@@ -10,42 +10,17 @@
       <h1>Garment Manufacturing ERP</h1>
       <p class="subtitle">Sign in to continue</p>
       <form id="login-form">
-        <div class="form-field" style="margin-bottom:14px;">
-          <label for="login-username">Username</label>
-          <input type="text" id="login-username" autocomplete="username" required>
-        </div>
-        <div class="form-field" style="margin-bottom:6px;">
-          <label for="login-password">Password</label>
-          <input type="password" id="login-password" autocomplete="current-password" required>
-        </div>
+        <div class="form-field" style="margin-bottom:14px;"><label for="login-username">Username</label><input type="text" id="login-username" autocomplete="username" required></div>
+        <div class="form-field" style="margin-bottom:6px;"><label for="login-password">Password</label><input type="password" id="login-password" autocomplete="current-password" required></div>
         <div class="field-error" id="login-error"></div>
         <button type="submit" class="btn" id="login-submit-btn" style="width:100%; margin-top:10px;">Sign In</button>
       </form>
     </div>
   </div>
-  
   <?!= include('JS'); ?>
   <script>
     (function () {
-      // Helper to safely route the top window within Google Apps Script iframe sandbox
-      function redirectToPage(pageName) {
-        var url = '?page=' + pageName;
-        if (window.top && window.top.location) {
-          try {
-            window.top.location.href = url;
-            return;
-          } catch (e) {}
-        }
-        window.location.href = url;
-      }
-
-      // If already signed in, skip straight to the dashboard.
-      var existing = getSession();
-      if (existing && existing.sessionId) { 
-        redirectToPage('dashboard'); 
-        return; 
-      }
-      
+      if (getSessionId()) { navigateToPage('dashboard'); return; }
       qs('login-form').addEventListener('submit', function (evt) {
         evt.preventDefault();
         var username = qs('login-username').value.trim();
@@ -53,27 +28,16 @@
         var errorEl = qs('login-error');
         var btn = qs('login-submit-btn');
         errorEl.textContent = '';
-        
-        if (!username || !password) {
-          errorEl.textContent = 'Enter both username and password.';
-          return;
-        }
-        
+        if (!username || !password) { errorEl.textContent = 'Enter both username and password.'; return; }
         setButtonLoading(btn, true, 'Signing in...');
-        callServer('AuthService.login', username, password)
-          .then(function (response) {
-            if (!response || !response.data || !response.data.sessionId || !response.data.user) {
-              throw new Error('Login failed: the server returned an invalid authentication response.');
-            }
-            setSession(response.data.sessionId, response.data.user);
-            redirectToPage('dashboard');
-          })
-          .catch(function (err) {
-            errorEl.textContent = (err && err.message) ? err.message : 'Login failed.';
-          })
-          .then(function () { 
-            setButtonLoading(btn, false); 
-          });
+        callServer('AuthService.login', username, password).then(function (response) {
+          if (!response.data || !response.data.sessionId || !response.data.user) { throw new Error('Login failed: invalid authentication response.'); }
+          setSession(response.data.sessionId, response.data.user);
+          navigateToPage('dashboard');
+        }).catch(function (err) {
+          errorEl.textContent = (err && err.message) ? err.message : 'Login failed.';
+          setButtonLoading(btn, false);
+        });
       });
     })();
   </script>

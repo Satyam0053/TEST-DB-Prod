@@ -1,110 +1,81 @@
 <script>
-  /* ==========================================================================
-     JS.html - shared client-side helpers used by every module page.
-     ES5 only (var/function, no arrow functions/let/const/template literals -
-     project convention, applied here even though the browser could run
-     newer syntax, for one consistent style across every file in this repo).
-     Plain <script> - no scriptlet tags (see Code.gs's include() comment).
-     ========================================================================== */
-  
+  /* Shared client-side helpers. */
   var SESSION_STORAGE_KEY = 'gmerp_session';
-  
-  function qs(id) { return document.getElementById(id); }
-  
-  // ---- Session (spec: no server-side session cookie - the sessionId from
-  // AuthService.login() lives in localStorage and is sent back on every
-  // google.script.run call; every *Service.gs function re-validates it
-  // server-side regardless, so this is a convenience, not the security
-  // boundary) ---------------------------------------------------------------
-  
-  function getSession() {
-    try {
-      var raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
-      if (raw) { return JSON.parse(raw); }
-    } catch (e) {}
-    
-    try {
-      var rawLocal = localStorage.getItem(SESSION_STORAGE_KEY);
-      if (rawLocal) { return JSON.parse(rawLocal); }
-    } catch (e) {}
 
+  function qs(id) { return document.getElementById(id); }
+
+  function getSession() {
+    var raw;
+    try { raw = sessionStorage.getItem(SESSION_STORAGE_KEY); } catch (e) { raw = null; }
+    if (raw) { try { return JSON.parse(raw); } catch (e2) {} }
+    try { raw = localStorage.getItem(SESSION_STORAGE_KEY); } catch (e3) { raw = null; }
+    if (raw) { try { return JSON.parse(raw); } catch (e4) {} }
     return null;
   }
-  
-  function setSession(sessionId, user) {
-    try {
-      sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
-        sessionId: sessionId,
-        user: user
-      }));
-    } catch (e) {}
 
-    try {
-      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
-        sessionId: sessionId,
-        user: user
-      }));
-    } catch (e) {
-      // localStorage unavailable - session just won't persist across reloads
-    }
+  function setSession(sessionId, user) {
+    var value = JSON.stringify({ sessionId: sessionId, user: user });
+    try { sessionStorage.setItem(SESSION_STORAGE_KEY, value); } catch (e) {}
+    try { localStorage.setItem(SESSION_STORAGE_KEY, value); } catch (e2) {}
   }
-  
+
   function clearSession() {
     try { sessionStorage.removeItem(SESSION_STORAGE_KEY); } catch (e) {}
-    try { localStorage.removeItem(SESSION_STORAGE_KEY); } catch (e) {}
+    try { localStorage.removeItem(SESSION_STORAGE_KEY); } catch (e2) {}
   }
-  
+
   function getSessionId() {
-    var s = getSession();
-    return s ? s.sessionId : null;
+    var session = getSession();
+    return session && session.sessionId ? session.sessionId : null;
   }
-  
+
   function getCurrentUser() {
-    var s = getSession();
-    return s ? s.user : null;
+    var session = getSession();
+    return session ? session.user : null;
   }
-  
-  /** Called at the top of every module page except Login.html. Redirects to
-    *  the login page if there's no local session; returns the user object
-    *  otherwise. The server is still the real gatekeeper - see file header. */
+
+  function navigateToPage(pageName) {
+    var target = '?page=' + encodeURIComponent(String(pageName || 'login'));
+    try {
+      if (window.top && window.top !== window) {
+        window.top.location.href = target;
+        return;
+      }
+    } catch (e) {}
+    window.location.href = target;
+  }
+
   function requireAuth() {
     var session = getSession();
-    if (!session || !session.sessionId) {
-      window.location.href = '?page=login';
+    if (!session || !session.sessionId || !session.user) {
+      navigateToPage('login');
       return null;
     }
     return session.user;
   }
-  
+
   function logout() {
     var sessionId = getSessionId();
     clearSession();
-    if (sessionId) {
-      callServer('AuthService.logout', sessionId).catch(function () { /* best-effort */ });
+    if (sessionId && typeof google !== 'undefined' && google.script && google.script.run) {
+      callServer('AuthService.logout', sessionId).catch(function () {});
     }
-    window.location.href = '?page=login';
+    navigateToPage('login');
   }
-  
-  // ---- google.script.run wrapper -------------------------------------------
-  // fnPath is written everywhere in this project as 'ServiceName.methodName'
-  // (e.g. 'JobCardService.createJobCard') purely for readability at the call
-  // site - but google.script.run can only invoke a top-level GLOBAL function
-  // declared with `function name(...)` in a .gs file. It cannot reach into a
-  // namespaced object like `JobCardService.createJobCard`, so calling
-  // google.script.run.JobCardService.createJobCard(...) would fail. ClientApi.gs
-  // provides a flat top-level wrapper function (named just 'createJobCard')
-  // for every client-facing *Service.gs method that forwards to the real
-  // implementation - so only the LAST path segment is actually used here.
-  // Every one of those wrapper names is verified unique across the whole
-  // project (see ClientApi.gs's header), so this is safe.
+
   function callServer(fnPath) {
     var args = Array.prototype.slice.call(arguments, 1);
-    var methodName = fnPath.split('.').pop();
+    var methodName = String(fnPath || '').split('.').pop();
+    if (!methodName || typeof google === 'undefined' || !google.script || !google.script.run) {
+      return Promise.reject(new Error('The Apps Script server bridge is unavailable. Reload the page and try again.'));
+    }
     return new Promise(function (resolve, reject) {
       var runner = google.script.run
         .withSuccessHandler(function (response) {
           if (response && response.success === false) {
             reject(new Error(response.message || 'Request failed.'));
+          } else if (!response) {
+            reject(new Error('The server returned an empty response.'));
           } else {
             resolve(response);
           }
@@ -112,12 +83,18 @@
         .withFailureHandler(function (error) {
           reject(new Error((error && error.message) ? error.message : 'A server error occurred.'));
         });
-      runner[methodName].apply(runner, args);
+      try {
+        if (typeof runner[methodName] !== 'function') {
+          reject(new Error('Server method is not available: ' + methodName));
+          return;
+        }
+        runner[methodName].apply(runner, args);
+      } catch (e) {
+        reject(e);
+      }
     });
   }
-  
-  // ---- Toast ---------------------------------------------------------------
-  
+
   function ensureToastStack_() {
     var stack = qs('toast-stack');
     if (!stack) {
@@ -127,59 +104,42 @@
     }
     return stack;
   }
-  
+
   function showToast(message, type) {
     var stack = ensureToastStack_();
     var el = document.createElement('div');
     el.className = 'toast toast--' + (type || 'info');
     el.textContent = message;
     stack.appendChild(el);
-    setTimeout(function () {
-      if (el.parentNode) { el.parentNode.removeChild(el); }
-    }, 3800);
+    setTimeout(function () { if (el.parentNode) { el.parentNode.removeChild(el); } }, 3800);
   }
-  
+
   function showError(err) {
     showToast((err && err.message) ? err.message : String(err), 'error');
   }
-  
-  // ---- Modal ---------------------------------------------------------------
-  
-  function openModal(modalId) {
-    var el = qs(modalId);
-    if (el) { el.classList.add('is-open'); }
+
+  function reportFatalError(message) {
+    var text = (message && message.message) ? message.message : String(message || 'Unexpected application error.');
+    console.error(text);
+    var box = document.createElement('div');
+    box.style.cssText = 'margin:24px;padding:20px;background:#fff4f4;color:#991b1b;border:1px solid #fecaca;border-radius:8px;font-family:Arial,sans-serif;';
+    box.innerHTML = '<strong>Application error</strong><br><br>' + escapeHtml(text) + '<br><br><button type="button" class="btn" onclick="window.location.reload()">Reload</button>';
+    document.body.insertBefore(box, document.body.firstChild);
   }
-  
-  function closeModal(modalId) {
-    var el = qs(modalId);
-    if (el) { el.classList.remove('is-open'); }
-  }
-  
-  // ---- Formatting / escaping -------------------------------------------------
-  
+
+  window.addEventListener('error', function (event) { reportFatalError(event.error || event.message); });
+  window.addEventListener('unhandledrejection', function (event) { reportFatalError(event.reason); });
+
+  function openModal(modalId) { var el = qs(modalId); if (el) { el.classList.add('is-open'); } }
+  function closeModal(modalId) { var el = qs(modalId); if (el) { el.classList.remove('is-open'); } }
+
   function escapeHtml(value) {
     if (value === null || typeof value === 'undefined') { return ''; }
-    return String(value)
-      .replace(/&/g, '&amp;')
-      .replace(/</g, '&lt;')
-      .replace(/>/g, '&gt;')
-      .replace(/"/g, '&quot;')
-      .replace(/'/g, '&#39;');
+    return String(value).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
   }
-  
+
   function pad2_(n) { return (n < 10 ? '0' : '') + n; }
-  
-  /**
-   * google.script.run auto-converts a server Date return value into a real
-   * client-side JS Date object (not a string) - so every date/datetime field
-   * coming back from a *Service.gs call can arrive as either, depending on
-   * how it was produced server-side (a raw JDBC column vs. a hand-built
-   * string). This normalizes both into the same {y,m,d,hh,mm} shape.
-   * Reading a Date object's components uses the BROWSER's local time zone;
-   * this assumes the browser is set to IST, matching APP_TIME_ZONE server-
-   * side (see ARCHITECTURE.md's time-zone-consistency note) - a browser in a
-   * different zone could display a date shifted by one day.
-   */
+
   function toDateParts_(value) {
     if (Object.prototype.toString.call(value) === '[object Date]') {
       if (isNaN(value.getTime())) { return null; }
@@ -191,56 +151,22 @@
     if (dateBits.length !== 3) { return null; }
     var timeBits = [0, 0];
     var timeStr = str.indexOf('T') > -1 ? str.split('T')[1] : (str.indexOf(' ') > -1 ? str.split(' ')[1] : null);
-    if (timeStr) {
-      var tb = timeStr.split(':');
-      timeBits = [Number(tb[0]) || 0, Number(tb[1]) || 0];
-    }
+    if (timeStr) { var tb = timeStr.split(':'); timeBits = [Number(tb[0]) || 0, Number(tb[1]) || 0]; }
     return { y: Number(dateBits[0]), m: Number(dateBits[1]), d: Number(dateBits[2]), hh: timeBits[0], mm: timeBits[1] };
   }
-  
-  function formatDate(value) {
-    if (!value) { return '-'; }
-    var p = toDateParts_(value);
-    if (!p) { return String(value); }
-    return pad2_(p.d) + '-' + pad2_(p.m) + '-' + p.y;
-  }
-  
-  function formatDateTime(value) {
-    if (!value) { return '-'; }
-    var p = toDateParts_(value);
-    if (!p) { return String(value); }
-    return pad2_(p.d) + '-' + pad2_(p.m) + '-' + p.y + ' ' + pad2_(p.hh) + ':' + pad2_(p.mm);
-  }
-  
-  function formatNumber(value) {
-    if (value === null || typeof value === 'undefined' || value === '') { return '-'; }
-    var num = Number(value);
-    if (isNaN(num)) { return String(value); }
-    return num.toLocaleString('en-IN');
-  }
-  
-  // ---- Misc ---------------------------------------------------------------
-  
+
+  function formatDate(value) { if (!value) { return '-'; } var p = toDateParts_(value); return p ? pad2_(p.d) + '-' + pad2_(p.m) + '-' + p.y : String(value); }
+  function formatDateTime(value) { if (!value) { return '-'; } var p = toDateParts_(value); return p ? pad2_(p.d) + '-' + pad2_(p.m) + '-' + p.y + ' ' + pad2_(p.hh) + ':' + pad2_(p.mm) : String(value); }
+  function formatNumber(value) { if (value === null || typeof value === 'undefined' || value === '') { return '-'; } var num = Number(value); return isNaN(num) ? String(value) : num.toLocaleString('en-IN'); }
+
   function debounce(fn, waitMs) {
     var timer = null;
-    return function () {
-      var ctx = this;
-      var args = arguments;
-      clearTimeout(timer);
-      timer = setTimeout(function () { fn.apply(ctx, args); }, waitMs);
-    };
+    return function () { var ctx = this; var args = arguments; clearTimeout(timer); timer = setTimeout(function () { fn.apply(ctx, args); }, waitMs); };
   }
-  
+
   function setButtonLoading(btnEl, isLoading, loadingText) {
     if (!btnEl) { return; }
-    if (isLoading) {
-      btnEl.setAttribute('data-original-text', btnEl.innerHTML);
-      btnEl.disabled = true;
-      btnEl.innerHTML = '<span class="spinner"></span> ' + (loadingText || 'Please wait...');
-    } else {
-      btnEl.disabled = false;
-      var original = btnEl.getAttribute('data-original-text');
-      if (original !== null) { btnEl.innerHTML = original; }
-    }
+    if (isLoading) { btnEl.setAttribute('data-original-text', btnEl.innerHTML); btnEl.disabled = true; btnEl.innerHTML = '<span class="spinner"></span> ' + (loadingText || 'Please wait...'); }
+    else { btnEl.disabled = false; var original = btnEl.getAttribute('data-original-text'); if (original !== null) { btnEl.innerHTML = original; } }
   }
 </script>

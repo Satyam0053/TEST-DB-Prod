@@ -1,0 +1,146 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <?!= include('CSS'); ?>
+</head>
+<body>
+  <?!= include('JS'); ?>
+  <?!= include('Components'); ?>
+  <script>
+    (function () {
+      var content = buildAppShell('delivery', 'Delivery');
+      if (!content) { return; }
+
+      var state = { status: '', page: 1, pageSize: 15 };
+      var jobCards = [];
+
+      content.innerHTML =
+        '<div class="kpi-grid" id="otd-kpi"></div>' +
+        '<div class="card">' +
+          '<div class="card__header">' +
+            '<h3 class="card__title">Delivery Tracking</h3>' +
+            '<button class="btn" id="dl-new-btn" type="button">+ New Delivery Record</button>' +
+          '</div>' +
+          '<div class="toolbar">' +
+            '<select id="dl-status">' +
+              '<option value="">All statuses</option>' +
+              '<option value="Pending">Pending</option><option value="Ready">Ready</option>' +
+              '<option value="Partially Dispatched">Partially Dispatched</option>' +
+              '<option value="Dispatched">Dispatched</option><option value="Delayed">Delayed</option>' +
+            '</select>' +
+          '</div>' +
+          '<div id="dl-table"></div>' +
+          '<div id="dl-pagination"></div>' +
+        '</div>' +
+
+        '<div class="modal-overlay" id="dl-create-modal">' +
+          '<div class="modal">' +
+            '<div class="modal__header"><h3>New Delivery Record</h3><button class="modal__close" type="button" onclick="closeModal(\'dl-create-modal\')">&times;</button></div>' +
+            '<div class="modal__body">' +
+              '<div class="form-grid">' +
+                '<div class="form-field"><label>Job Card *</label><select id="dl-jobcard"></select></div>' +
+                '<div class="form-field"><label>Target Delivery Date</label><input type="date" id="dl-target"></div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="modal__footer"><button class="btn btn--secondary" type="button" onclick="closeModal(\'dl-create-modal\')">Cancel</button><button class="btn" id="dl-create-submit" type="button">Create</button></div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="modal-overlay" id="dl-update-modal">' +
+          '<div class="modal">' +
+            '<div class="modal__header"><h3 id="dl-update-title">Update</h3><button class="modal__close" type="button" onclick="closeModal(\'dl-update-modal\')">&times;</button></div>' +
+            '<div class="modal__body">' +
+              '<input type="hidden" id="dl-update-id"><input type="hidden" id="dl-update-kind">' +
+              '<p class="text-muted" id="dl-update-hint"></p>' +
+              '<div class="form-field"><label id="dl-update-label">Quantity</label><input type="number" id="dl-update-qty" min="0"></div>' +
+            '</div>' +
+            '<div class="modal__footer"><button class="btn btn--secondary" type="button" onclick="closeModal(\'dl-update-modal\')">Cancel</button><button class="btn" id="dl-update-submit" type="button">Save</button></div>' +
+          '</div>' +
+        '</div>';
+
+      function loadOtd() {
+        return callServer('DeliveryService.getOtdSummary', getSessionId(), {}).then(function (res) {
+          var k = res.data;
+          qs('otd-kpi').innerHTML =
+            '<div class="kpi-card"><div class="kpi-card__label">On-Time Delivery %</div><div class="kpi-card__value">' + (k.otdPct === null ? '-' : k.otdPct + '%') + '</div></div>' +
+            '<div class="kpi-card"><div class="kpi-card__label">Total Dispatched</div><div class="kpi-card__value">' + k.totalDispatched + '</div></div>' +
+            '<div class="kpi-card"><div class="kpi-card__label">On Time</div><div class="kpi-card__value">' + k.onTimeCount + '</div></div>' +
+            '<div class="kpi-card"><div class="kpi-card__label">Delayed</div><div class="kpi-card__value">' + k.delayedCount + '</div></div>';
+        });
+      }
+
+      function actionsForRow_(row) {
+        if (row.delivery_status === 'Dispatched') { return '<span class="text-muted">Complete</span>'; }
+        return '<button class="btn btn--sm" type="button" onclick="dlOpenUpdate(' + row.delivery_id + ',\'packing\',' + row.order_qty + ',' + row.packed_qty + ')">Pack</button>' +
+          ' <button class="btn btn--sm" type="button" onclick="dlOpenUpdate(' + row.delivery_id + ',\'ready\',' + row.packed_qty + ',' + row.ready_qty + ')">Ready</button>' +
+          ' <button class="btn btn--sm" type="button" onclick="dlOpenUpdate(' + row.delivery_id + ',\'dispatch\',' + row.ready_qty + ',' + row.dispatched_qty + ')">Dispatch</button>';
+      }
+
+      function loadList() {
+        var filters = {};
+        if (state.status) { filters.status = state.status; }
+        return callServer('DeliveryService.listDeliveries', getSessionId(), filters, state.page, state.pageSize).then(function (res) {
+          renderTable(qs('dl-table'),
+            [
+              { key: 'job_card_no', label: 'Job Card' }, { key: 'buyer_name', label: 'Buyer' },
+              { key: 'order_qty', label: 'Order', formatter: formatNumber }, { key: 'packed_qty', label: 'Packed', formatter: formatNumber },
+              { key: 'ready_qty', label: 'Ready', formatter: formatNumber }, { key: 'dispatched_qty', label: 'Dispatched', formatter: formatNumber },
+              { key: 'target_delivery_date', label: 'Target', formatter: formatDate },
+              { key: 'delivery_status', label: 'Status', formatter: statusBadgeHtml }
+            ],
+            res.data.rows,
+            { actionsHtml: actionsForRow_ }
+          );
+          renderPagination(qs('dl-pagination'), res.data, function (p) { state.page = p; loadList().catch(showError); });
+        });
+      }
+
+      function loadJobCards() {
+        return callServer('JobCardService.listJobCards', getSessionId(), {}, 1, 200).then(function (res) {
+          jobCards = res.data.rows;
+        });
+      }
+
+      qs('dl-status').addEventListener('change', function () { state.status = this.value; state.page = 1; loadList().catch(showError); });
+
+      qs('dl-new-btn').addEventListener('click', function () {
+        qs('dl-jobcard').innerHTML = buildOptionsHtml(jobCards.map(function (jc) { return { id: jc.job_card_id, label: jc.job_card_no + ' - ' + jc.buyer }; }), 'id', 'label', 'Select job card');
+        qs('dl-target').value = '';
+        openModal('dl-create-modal');
+      });
+      qs('dl-create-submit').addEventListener('click', function () {
+        var btn = this;
+        setButtonLoading(btn, true, 'Creating...');
+        callServer('DeliveryService.createDeliveryRecord', getSessionId(), Number(qs('dl-jobcard').value), qs('dl-target').value || undefined)
+          .then(function (res) { showToast(res.message, 'success'); closeModal('dl-create-modal'); return Promise.all([loadList(), loadOtd()]); })
+          .catch(showError)
+          .then(function () { setButtonLoading(btn, false); });
+      });
+
+      window.dlOpenUpdate = function (deliveryId, kind, cap, current) {
+        qs('dl-update-id').value = deliveryId; qs('dl-update-kind').value = kind;
+        var labels = { packing: 'Record Packing', ready: 'Mark Ready', dispatch: 'Record Dispatch' };
+        qs('dl-update-title').textContent = labels[kind];
+        qs('dl-update-hint').textContent = 'Cap: ' + cap + ' (currently: ' + current + ')';
+        qs('dl-update-qty').value = current; qs('dl-update-qty').setAttribute('max', cap);
+        openModal('dl-update-modal');
+      };
+      qs('dl-update-submit').addEventListener('click', function () {
+        var btn = this;
+        var kind = qs('dl-update-kind').value;
+        var deliveryId = Number(qs('dl-update-id').value);
+        var qty = Number(qs('dl-update-qty').value);
+        var fnMap = { packing: 'DeliveryService.recordPacking', ready: 'DeliveryService.recordReady', dispatch: 'DeliveryService.recordDispatch' };
+        setButtonLoading(btn, true, 'Saving...');
+        callServer(fnMap[kind], getSessionId(), deliveryId, qty)
+          .then(function (res) { showToast(res.message, 'success'); closeModal('dl-update-modal'); return Promise.all([loadList(), loadOtd()]); })
+          .catch(showError)
+          .then(function () { setButtonLoading(btn, false); });
+      });
+
+      loadJobCards().then(function () { return Promise.all([loadList(), loadOtd()]); }).catch(showError);
+    })();
+  </script>
+</body>
+</html>

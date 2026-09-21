@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <?!= include('CSS'); ?>
+</head>
+<body>
+  <?!= include('JS'); ?>
+  <?!= include('Components'); ?>
+  <script>
+    (function () {
+      var content = buildAppShell('production', 'Production');
+      if (!content) { return; }
+
+      var state = { jobCardId: '', status: '', page: 1, pageSize: 15 };
+      var jobCards = [];
+
+      content.innerHTML =
+        '<div class="card">' +
+          '<div class="card__header">' +
+            '<h3 class="card__title">Production Bundles</h3>' +
+            '<button class="btn" id="pb-new-btn" type="button">+ New Bundle</button>' +
+          '</div>' +
+          '<div class="toolbar">' +
+            '<select id="pb-jobcard-filter"><option value="">All job cards</option></select>' +
+            '<select id="pb-status-filter">' +
+              '<option value="">All statuses</option>' +
+              '<option value="Pending">Pending</option>' +
+              '<option value="In Progress">In Progress</option>' +
+              '<option value="Completed">Completed</option>' +
+              '<option value="Hold">Hold</option>' +
+              '<option value="Cancelled">Cancelled</option>' +
+            '</select>' +
+          '</div>' +
+          '<div id="pb-table"></div>' +
+          '<div id="pb-pagination"></div>' +
+        '</div>' +
+
+        '<div class="modal-overlay" id="pb-create-modal">' +
+          '<div class="modal">' +
+            '<div class="modal__header"><h3>New Bundle</h3><button class="modal__close" type="button" onclick="closeModal(\'pb-create-modal\')">&times;</button></div>' +
+            '<div class="modal__body">' +
+              '<div class="form-grid">' +
+                '<div class="form-field"><label>Job Card *</label><select id="pb-jobcard"></select></div>' +
+                '<div class="form-field"><label>Line</label><select id="pb-line"></select></div>' +
+                '<div class="form-field"><label>Operator</label><select id="pb-operator"></select></div>' +
+                '<div class="form-field"><label>Issued Qty *</label><input type="number" id="pb-issuedQty" min="1"></div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="modal__footer"><button class="btn btn--secondary" type="button" onclick="closeModal(\'pb-create-modal\')">Cancel</button><button class="btn" id="pb-create-submit" type="button">Create Bundle</button></div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="modal-overlay" id="pb-progress-modal">' +
+          '<div class="modal">' +
+            '<div class="modal__header"><h3>Record Progress</h3><button class="modal__close" type="button" onclick="closeModal(\'pb-progress-modal\')">&times;</button></div>' +
+            '<div class="modal__body">' +
+              '<input type="hidden" id="pb-progress-id">' +
+              '<p class="text-muted" id="pb-progress-hint"></p>' +
+              '<div class="form-grid">' +
+                '<div class="form-field"><label>Completed Qty *</label><input type="number" id="pb-progress-completed" min="0"></div>' +
+                '<div class="form-field"><label>Rejected Qty</label><input type="number" id="pb-progress-rejected" min="0" value="0"></div>' +
+                '<div class="form-field"><label>Rework Qty</label><input type="number" id="pb-progress-rework" min="0" value="0"></div>' +
+                '<div class="form-field"><label>Remarks</label><input type="text" id="pb-progress-remarks"></div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="modal__footer"><button class="btn btn--secondary" type="button" onclick="closeModal(\'pb-progress-modal\')">Cancel</button><button class="btn" id="pb-progress-submit" type="button">Save</button></div>' +
+          '</div>' +
+        '</div>';
+
+      function actionsForRow_(row) {
+        var id = row.bundle_id;
+        if (row.status === 'Pending') {
+          return '<button class="btn btn--sm" type="button" onclick="pbStart(' + id + ')">Start</button>' +
+            ' <button class="btn btn--danger btn--sm" type="button" onclick="pbCancel(' + id + ')">Cancel</button>';
+        }
+        if (row.status === 'In Progress') {
+          return '<button class="btn btn--sm" type="button" onclick="pbOpenProgress(' + id + ',' + row.issued_qty + ',' + row.completed_qty + ',' + row.rejected_qty + ',' + row.rework_qty + ')">Progress</button>' +
+            ' <button class="btn btn--secondary btn--sm" type="button" onclick="pbHold(' + id + ')">Hold</button>';
+        }
+        if (row.status === 'Hold') {
+          return '<button class="btn btn--secondary btn--sm" type="button" onclick="pbResume(' + id + ')">Resume</button>';
+        }
+        return '<span class="text-muted">-</span>';
+      }
+
+      function loadList() {
+        var filters = {};
+        if (state.jobCardId) { filters.jobCardId = Number(state.jobCardId); }
+        if (state.status) { filters.status = state.status; }
+        return callServer('ProductionService.listBundles', getSessionId(), filters, state.page, state.pageSize).then(function (res) {
+          renderTable(qs('pb-table'),
+            [
+              { key: 'bundle_no', label: 'Bundle' },
+              { key: 'job_card_no', label: 'Job Card' },
+              { key: 'line_name', label: 'Line' },
+              { key: 'operator_name', label: 'Operator' },
+              { key: 'issued_qty', label: 'Issued', formatter: formatNumber },
+              { key: 'completed_qty', label: 'Completed', formatter: formatNumber },
+              { key: 'rejected_qty', label: 'Rejected', formatter: formatNumber },
+              { key: 'status', label: 'Status', formatter: statusBadgeHtml }
+            ],
+            res.data.rows,
+            { actionsHtml: actionsForRow_ }
+          );
+          renderPagination(qs('pb-pagination'), res.data, function (p) { state.page = p; loadList().catch(showError); });
+        });
+      }
+
+      function loadJobCards() {
+        return callServer('JobCardService.listJobCards', getSessionId(), {}, 1, 200).then(function (res) {
+          jobCards = res.data.rows;
+          var opts = buildOptionsHtml(jobCards.map(function (r) { return { id: r.job_card_id, label: r.job_card_no + ' - ' + r.buyer }; }), 'id', 'label', 'Select a job card');
+          qs('pb-jobcard').innerHTML = opts;
+          qs('pb-jobcard-filter').innerHTML = '<option value="">All job cards</option>' + buildOptionsHtml(jobCards.map(function (r) { return { id: r.job_card_id, label: r.job_card_no }; }), 'id', 'label');
+        });
+      }
+
+      function loadLines() {
+        return callServer('MasterDataService.listProductionLines', getSessionId()).then(function (res) {
+          qs('pb-line').innerHTML = buildOptionsHtml(res.data, 'line_id', 'line_name', 'Unassigned');
+        });
+      }
+      function loadOperators() {
+        return callServer('MasterDataService.listEmployees', getSessionId()).then(function (res) {
+          qs('pb-operator').innerHTML = buildOptionsHtml(res.data, 'employee_id', 'full_name', 'Unassigned');
+        });
+      }
+
+      qs('pb-jobcard-filter').addEventListener('change', function () { state.jobCardId = this.value; state.page = 1; loadList().catch(showError); });
+      qs('pb-status-filter').addEventListener('change', function () { state.status = this.value; state.page = 1; loadList().catch(showError); });
+
+      qs('pb-new-btn').addEventListener('click', function () {
+        qs('pb-issuedQty').value = '';
+        openModal('pb-create-modal');
+      });
+      qs('pb-create-submit').addEventListener('click', function () {
+        var btn = this;
+        var input = {
+          jobCardId: Number(qs('pb-jobcard').value),
+          lineId: qs('pb-line').value ? Number(qs('pb-line').value) : undefined,
+          operatorId: qs('pb-operator').value ? Number(qs('pb-operator').value) : undefined,
+          issuedQty: Number(qs('pb-issuedQty').value)
+        };
+        setButtonLoading(btn, true, 'Creating...');
+        callServer('ProductionService.createBundle', getSessionId(), input)
+          .then(function (res) { showToast(res.message, 'success'); closeModal('pb-create-modal'); return loadList(); })
+          .catch(showError)
+          .then(function () { setButtonLoading(btn, false); });
+      });
+
+      window.pbStart = function (bundleId) {
+        callServer('ProductionService.startBundle', getSessionId(), bundleId)
+          .then(function (res) { showToast(res.message, 'success'); return loadList(); }).catch(showError);
+      };
+      window.pbCancel = function (bundleId) {
+        if (!confirm('Cancel this bundle?')) { return; }
+        callServer('ProductionService.cancelBundle', getSessionId(), bundleId, '')
+          .then(function (res) { showToast(res.message, 'success'); return loadList(); }).catch(showError);
+      };
+      window.pbHold = function (bundleId) {
+        callServer('ProductionService.holdBundle', getSessionId(), bundleId)
+          .then(function (res) { showToast(res.message, 'success'); return loadList(); }).catch(showError);
+      };
+      window.pbResume = function (bundleId) {
+        callServer('ProductionService.resumeBundle', getSessionId(), bundleId)
+          .then(function (res) { showToast(res.message, 'success'); return loadList(); }).catch(showError);
+      };
+      window.pbOpenProgress = function (bundleId, issuedQty, completedQty, rejectedQty, reworkQty) {
+        qs('pb-progress-id').value = bundleId;
+        qs('pb-progress-hint').textContent = 'Issued qty: ' + issuedQty;
+        qs('pb-progress-completed').value = completedQty; qs('pb-progress-completed').setAttribute('max', issuedQty);
+        qs('pb-progress-rejected').value = rejectedQty;
+        qs('pb-progress-rework').value = reworkQty;
+        qs('pb-progress-remarks').value = '';
+        openModal('pb-progress-modal');
+      };
+      qs('pb-progress-submit').addEventListener('click', function () {
+        var btn = this;
+        setButtonLoading(btn, true, 'Saving...');
+        callServer('ProductionService.recordBundleProgress', getSessionId(), Number(qs('pb-progress-id').value),
+          Number(qs('pb-progress-completed').value), Number(qs('pb-progress-rejected').value), Number(qs('pb-progress-rework').value), qs('pb-progress-remarks').value || null)
+          .then(function (res) { showToast(res.message, 'success'); closeModal('pb-progress-modal'); return loadList(); })
+          .catch(showError)
+          .then(function () { setButtonLoading(btn, false); });
+      });
+
+      Promise.all([loadJobCards(), loadLines(), loadOperators()]).then(function () { return loadList(); }).catch(showError);
+    })();
+  </script>
+</body>
+</html>

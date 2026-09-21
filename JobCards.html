@@ -1,0 +1,231 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <?!= include('CSS'); ?>
+</head>
+<body>
+  <?!= include('JS'); ?>
+  <?!= include('Components'); ?>
+  <script>
+    (function () {
+      var content = buildAppShell('jobcards', 'Job Cards');
+      if (!content) { return; }
+
+      var state = { page: 1, pageSize: 15, status: '', search: '' };
+      var openPOs = [];
+      var fabricatorVendors = [];
+
+      content.innerHTML =
+        '<div class="card">' +
+          '<div class="card__header">' +
+            '<h3 class="card__title">All Job Cards</h3>' +
+            '<button class="btn" id="jc-new-btn" type="button">+ New Job Card</button>' +
+          '</div>' +
+          '<div class="toolbar">' +
+            '<input type="text" id="jc-search" placeholder="Search job card no...">' +
+            '<select id="jc-status">' +
+              '<option value="">All statuses</option>' +
+              '<option value="Pending">Pending</option>' +
+              '<option value="In Progress">In Progress</option>' +
+              '<option value="Completed">Completed</option>' +
+              '<option value="On Hold">On Hold</option>' +
+              '<option value="Cancelled">Cancelled</option>' +
+            '</select>' +
+          '</div>' +
+          '<div id="jc-table"></div>' +
+          '<div id="jc-pagination"></div>' +
+        '</div>' +
+
+        '<div class="modal-overlay" id="jc-create-modal">' +
+          '<div class="modal">' +
+            '<div class="modal__header"><h3>New Job Card</h3><button class="modal__close" type="button" onclick="closeModal(\'jc-create-modal\')">&times;</button></div>' +
+            '<div class="modal__body">' +
+              '<div class="form-grid">' +
+                '<div class="form-field"><label>Purchase Order *</label><select id="jc-poId"></select></div>' +
+                '<div class="form-field"><label>Order Qty *</label><input type="number" id="jc-orderQty" min="1"></div>' +
+                '<div class="form-field"><label>Target Date</label><input type="date" id="jc-targetDate"></div>' +
+                '<div class="form-field"><label>SAM Value</label><input type="number" step="0.01" id="jc-samValue"><span class="hint">Leave blank to use the style default</span></div>' +
+                '<div class="form-field"><label>Production Type</label><select id="jc-productionType"><option value="In-House">In-House</option><option value="Fabricator">Fabricator</option></select></div>' +
+                '<div class="form-field" id="jc-vendor-field" style="display:none;"><label>Fabricator Vendor *</label><select id="jc-vendorId"></select></div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="modal__footer"><button class="btn btn--secondary" type="button" onclick="closeModal(\'jc-create-modal\')">Cancel</button><button class="btn" id="jc-create-submit" type="button">Create Job Card</button></div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="modal-overlay" id="jc-detail-modal">' +
+          '<div class="modal" style="max-width:720px;">' +
+            '<div class="modal__header"><h3 id="jc-detail-title">Job Card</h3><button class="modal__close" type="button" onclick="closeModal(\'jc-detail-modal\')">&times;</button></div>' +
+            '<div class="modal__body" id="jc-detail-body"></div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="modal-overlay" id="jc-edit-modal">' +
+          '<div class="modal">' +
+            '<div class="modal__header"><h3>Edit Job Card</h3><button class="modal__close" type="button" onclick="closeModal(\'jc-edit-modal\')">&times;</button></div>' +
+            '<div class="modal__body">' +
+              '<input type="hidden" id="jc-edit-id">' +
+              '<div class="form-grid">' +
+                '<div class="form-field"><label>Target Date</label><input type="date" id="jc-edit-targetDate"></div>' +
+                '<div class="form-field"><label>SAM Value</label><input type="number" step="0.01" id="jc-edit-samValue"></div>' +
+                '<div class="form-field"><label>Garment Type</label><input type="text" id="jc-edit-garmentType"></div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="modal__footer"><button class="btn btn--secondary" type="button" onclick="closeModal(\'jc-edit-modal\')">Cancel</button><button class="btn" id="jc-edit-submit" type="button">Save Changes</button></div>' +
+          '</div>' +
+        '</div>';
+
+      function loadList() {
+        return callServer('JobCardService.listJobCards', getSessionId(), { status: state.status, search: state.search }, state.page, state.pageSize)
+          .then(function (res) {
+            renderTable(qs('jc-table'),
+              [
+                { key: 'job_card_no', label: 'Job Card' },
+                { key: 'buyer', label: 'Buyer' },
+                { key: 'style', label: 'Style' },
+                { key: 'order_qty', label: 'Order Qty', formatter: formatNumber },
+                { key: 'current_stage', label: 'Stage' },
+                { key: 'current_status', label: 'Status', formatter: statusBadgeHtml },
+                { key: 'target_date', label: 'Target', formatter: formatDate }
+              ],
+              res.data.rows,
+              {
+                actionsHtml: function (row) {
+                  return '<div class="cell-actions">' +
+                    '<button class="btn btn--secondary btn--sm" onclick="jcViewDetail(' + row.job_card_id + ')" type="button">View</button>' +
+                    '<button class="btn btn--secondary btn--sm" onclick="jcOpenEdit(' + row.job_card_id + ')" type="button">Edit</button>' +
+                    '</div>';
+                }
+              }
+            );
+            renderPagination(qs('jc-pagination'), res.data, function (p) { state.page = p; loadList().catch(showError); });
+          });
+      }
+
+      function loadPoOptions() {
+        return Promise.all([
+          callServer('PurchaseService.listPurchaseOrders', getSessionId(), { status: 'Open' }, 1, 100),
+          callServer('PurchaseService.listPurchaseOrders', getSessionId(), { status: 'In Production' }, 1, 100)
+        ]).then(function (results) {
+          openPOs = results[0].data.rows.concat(results[1].data.rows);
+          qs('jc-poId').innerHTML = buildOptionsHtml(openPOs.map(function (po) {
+            return { id: po.po_id, label: po.po_number + ' - ' + po.buyer_name + ' (' + po.order_qty + ')' };
+          }), 'id', 'label', 'Select a purchase order');
+        });
+      }
+
+      function loadVendorOptions() {
+        return callServer('MasterDataService.listVendors', getSessionId(), 'Fabricator').then(function (res) {
+          fabricatorVendors = res.data;
+          qs('jc-vendorId').innerHTML = buildOptionsHtml(fabricatorVendors, 'vendor_id', 'vendor_name', 'Select a vendor');
+        });
+      }
+
+      qs('jc-search').addEventListener('input', debounce(function () {
+        state.search = this.value; state.page = 1; loadList().catch(showError);
+      }, 350));
+      qs('jc-status').addEventListener('change', function () {
+        state.status = this.value; state.page = 1; loadList().catch(showError);
+      });
+
+      qs('jc-productionType').addEventListener('change', function () {
+        qs('jc-vendor-field').style.display = this.value === 'Fabricator' ? '' : 'none';
+      });
+
+      qs('jc-new-btn').addEventListener('click', function () {
+        qs('jc-orderQty').value = ''; qs('jc-targetDate').value = ''; qs('jc-samValue').value = '';
+        qs('jc-productionType').value = 'In-House'; qs('jc-vendor-field').style.display = 'none';
+        Promise.all([loadPoOptions(), loadVendorOptions()]).then(function () { openModal('jc-create-modal'); }).catch(showError);
+      });
+
+      qs('jc-create-submit').addEventListener('click', function () {
+        var btn = this;
+        var productionType = qs('jc-productionType').value;
+        var input = {
+          poId: Number(qs('jc-poId').value),
+          orderQty: Number(qs('jc-orderQty').value),
+          targetDate: qs('jc-targetDate').value || null,
+          samValue: qs('jc-samValue').value ? Number(qs('jc-samValue').value) : undefined,
+          productionType: productionType,
+          vendorId: productionType === 'Fabricator' ? Number(qs('jc-vendorId').value) : undefined
+        };
+        setButtonLoading(btn, true, 'Creating...');
+        callServer('JobCardService.createJobCard', getSessionId(), input)
+          .then(function (res) {
+            showToast(res.message, 'success');
+            closeModal('jc-create-modal');
+            return loadList();
+          })
+          .catch(showError)
+          .then(function () { setButtonLoading(btn, false); });
+      });
+
+      window.jcViewDetail = function (jobCardId) {
+        callServer('JobCardService.getJobCard', getSessionId(), jobCardId).then(function (res) {
+          var jc = res.data;
+          qs('jc-detail-title').textContent = jc.job_card_no + ' - ' + jc.buyer_name;
+          var stageRows = '';
+          for (var i = 0; i < jc.stages.length; i++) {
+            var s = jc.stages[i];
+            stageRows += '<tr><td>' + s.sequence_no + '. ' + escapeHtml(s.stage_name) + '</td><td>' + statusBadgeHtml(s.status) + '</td>' +
+              '<td>' + formatNumber(s.completed_qty) + ' / ' + formatNumber(s.quantity) + '</td>' +
+              '<td>' + formatDateTime(s.planned_end) + '</td></tr>';
+          }
+          qs('jc-detail-body').innerHTML =
+            '<div class="form-grid" style="margin-bottom:16px;">' +
+              '<div><strong>Style</strong><div>' + escapeHtml(jc.style_no) + ' - ' + escapeHtml(jc.style_name || '') + '</div></div>' +
+              '<div><strong>PO Number</strong><div>' + escapeHtml(jc.po_number) + '</div></div>' +
+              '<div><strong>Order Qty</strong><div>' + formatNumber(jc.order_qty) + '</div></div>' +
+              '<div><strong>Status</strong><div>' + statusBadgeHtml(jc.status) + '</div></div>' +
+              '<div><strong>Production Type</strong><div>' + escapeHtml(jc.production_type) + (jc.vendor_name ? ' (' + escapeHtml(jc.vendor_name) + ')' : '') + '</div></div>' +
+              '<div><strong>Target Date</strong><div>' + formatDate(jc.target_date) + '</div></div>' +
+            '</div>' +
+            '<h4>FMS Stage Progress</h4>' +
+            '<div class="table-wrap"><table class="data-table"><thead><tr><th>Stage</th><th>Status</th><th>Qty</th><th>Planned End</th></tr></thead><tbody>' + stageRows + '</tbody></table></div>' +
+            (jc.status !== 'Cancelled' && jc.status !== 'Completed' ?
+              '<div style="margin-top:16px; text-align:right;"><button class="btn btn--danger btn--sm" type="button" onclick="jcCancel(' + jc.job_card_id + ')">Cancel Job Card</button></div>' : '');
+          openModal('jc-detail-modal');
+        }).catch(showError);
+      };
+
+      window.jcCancel = function (jobCardId) {
+        if (!confirm('Cancel this job card? This cannot be undone.')) { return; }
+        var reason = prompt('Reason for cancellation (optional):') || '';
+        callServer('JobCardService.cancelJobCard', getSessionId(), jobCardId, reason).then(function (res) {
+          showToast(res.message, 'success');
+          closeModal('jc-detail-modal');
+          return loadList();
+        }).catch(showError);
+      };
+
+      window.jcOpenEdit = function (jobCardId) {
+        callServer('JobCardService.getJobCard', getSessionId(), jobCardId).then(function (res) {
+          var jc = res.data;
+          qs('jc-edit-id').value = jc.job_card_id;
+          qs('jc-edit-targetDate').value = jc.target_date ? formatDate(jc.target_date).split('-').reverse().join('-') : '';
+          qs('jc-edit-samValue').value = jc.sam_value || '';
+          qs('jc-edit-garmentType').value = jc.garment_type || '';
+          openModal('jc-edit-modal');
+        }).catch(showError);
+      };
+
+      qs('jc-edit-submit').addEventListener('click', function () {
+        var btn = this;
+        var patch = {
+          targetDate: qs('jc-edit-targetDate').value || null,
+          samValue: qs('jc-edit-samValue').value ? Number(qs('jc-edit-samValue').value) : undefined,
+          garmentType: qs('jc-edit-garmentType').value || undefined
+        };
+        setButtonLoading(btn, true, 'Saving...');
+        callServer('JobCardService.updateJobCard', getSessionId(), Number(qs('jc-edit-id').value), patch)
+          .then(function (res) { showToast(res.message, 'success'); closeModal('jc-edit-modal'); return loadList(); })
+          .catch(showError)
+          .then(function () { setButtonLoading(btn, false); });
+      });
+
+      loadList().catch(showError);
+    })();
+  </script>
+</body>
+</html>

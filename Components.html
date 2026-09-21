@@ -1,0 +1,159 @@
+<script>
+  /* ==========================================================================
+     Components.html - shared UI-building helpers used by every module page:
+     the app shell (dark sidebar + white header), a generic data-table
+     renderer, pagination, and a status-badge mapper.
+     ES5 only. Plain <script> - no scriptlet tags (see Code.gs's include()
+     comment - this file is included via include('Components') and is never
+     evaluated as a template, so it cannot contain <?!= ?> tags itself).
+     ========================================================================== */
+
+  var NAV_ITEMS = [
+    { key: 'dashboard', label: 'Dashboard', page: 'dashboard' },
+    { key: 'jobcards', label: 'Job Cards', page: 'jobcards' },
+    { key: 'fms', label: 'FMS Tracking', page: 'fms' },
+    { key: 'production', label: 'Production', page: 'production' },
+    { key: 'inventory', label: 'Inventory', page: 'inventory' },
+    { key: 'artwork', label: 'Artwork', page: 'artwork' },
+    { key: 'quality', label: 'Quality', page: 'quality' },
+    { key: 'delivery', label: 'Delivery', page: 'delivery' },
+    { key: 'purchase', label: 'Purchase Orders', page: 'purchase' },
+    { key: 'users', label: 'Users & Roles', page: 'users' },
+    { key: 'reports', label: 'Reports', page: 'reports' }
+  ];
+
+  /**
+   * Builds the sidebar+header shell around a fresh #page-content container
+   * and returns that container for the page's own script to fill in. Call
+   * this first thing on every module page except Login.html - it also
+   * enforces requireAuth() and returns null (having already redirected) if
+   * there's no local session.
+   */
+  function buildAppShell(activeKey, pageTitle) {
+    var user = requireAuth();
+    if (!user) { return null; }
+
+    document.documentElement.style.setProperty('--accent-current', 'var(--accent-' + activeKey + ')');
+
+    var shell = document.createElement('div');
+    shell.id = 'app-shell';
+
+    var navHtml = '';
+    for (var i = 0; i < NAV_ITEMS.length; i++) {
+      var item = NAV_ITEMS[i];
+      var activeClass = item.key === activeKey ? ' is-active' : '';
+      navHtml += '<div class="sidebar__link' + activeClass + '" data-page="' + item.page + '">' +
+        '<span class="sidebar__icon"></span>' + escapeHtml(item.label) + '</div>';
+    }
+
+    shell.innerHTML =
+      '<div class="sidebar" id="app-sidebar">' +
+        '<div class="sidebar__brand">Garment ERP<small>Avi Couture Production</small></div>' +
+        '<div class="sidebar__nav">' + navHtml + '</div>' +
+      '</div>' +
+      '<div class="main-col">' +
+        '<div class="header">' +
+          '<div class="header__title">' + escapeHtml(pageTitle) + '</div>' +
+          '<div class="header__right">' +
+            '<div class="header__user"><strong>' + escapeHtml(user.fullName) + '</strong><span>' + escapeHtml(user.username) + '</span></div>' +
+            '<button class="header__logout" id="app-logout-btn" type="button">Logout</button>' +
+          '</div>' +
+        '</div>' +
+        '<div class="page-content" id="page-content"></div>' +
+      '</div>';
+
+    document.body.insertBefore(shell, document.body.firstChild);
+
+    var links = shell.querySelectorAll('.sidebar__link');
+    for (var j = 0; j < links.length; j++) {
+      links[j].addEventListener('click', function (evt) {
+        window.location.href = '?page=' + evt.currentTarget.getAttribute('data-page');
+      });
+    }
+    qs('app-logout-btn').addEventListener('click', logout);
+
+    return qs('page-content');
+  }
+
+  // ---- Status badges -------------------------------------------------------
+
+  var STATUS_BADGE_MAP_ = {
+    'Pending': 'gray', 'Open': 'gray', 'Not Started': 'gray', 'Issued': 'blue',
+    'Started': 'blue', 'In Progress': 'blue', 'Partially Received': 'amber',
+    'Partially Dispatched': 'amber', 'Hold': 'amber', 'Delayed': 'red',
+    'Done': 'green', 'Completed': 'green', 'Ready': 'green', 'Received': 'green',
+    'Dispatched': 'green', 'Closed': 'gray', 'Cancelled': 'red', 'Passed': 'green',
+    'Failed': 'red', 'Partial': 'amber', 'Returned': 'green', 'Overdue': 'red',
+    'In Production': 'blue', 'Active': 'green', 'Inactive': 'red'
+  };
+
+  function statusBadgeHtml(status) {
+    var color = STATUS_BADGE_MAP_.hasOwnProperty(status) ? STATUS_BADGE_MAP_[status] : 'gray';
+    return '<span class="badge badge--' + color + '">' + escapeHtml(status || '-') + '</span>';
+  }
+
+  // ---- Generic data table -------------------------------------------------------
+
+  /**
+   * columns: [{ key, label, formatter: function(value, row) -> html string (optional) }]
+   * rows: array of plain row objects (server response rows)
+   * options.actionsHtml: function(row) -> html string for a trailing actions cell (optional)
+   * options.emptyMessage: string shown when rows.length === 0
+   */
+  function renderTable(containerEl, columns, rows, options) {
+    options = options || {};
+    if (!rows || rows.length === 0) {
+      containerEl.innerHTML = '<div class="table-empty">' + escapeHtml(options.emptyMessage || 'No records found.') + '</div>';
+      return;
+    }
+
+    var headHtml = '';
+    for (var c = 0; c < columns.length; c++) { headHtml += '<th>' + escapeHtml(columns[c].label) + '</th>'; }
+    if (options.actionsHtml) { headHtml += '<th></th>'; }
+
+    var bodyHtml = '';
+    for (var r = 0; r < rows.length; r++) {
+      var row = rows[r];
+      bodyHtml += '<tr>';
+      for (var cc = 0; cc < columns.length; cc++) {
+        var col = columns[cc];
+        var raw = row[col.key];
+        bodyHtml += '<td>' + (col.formatter ? col.formatter(raw, row) : escapeHtml(raw === null || typeof raw === 'undefined' ? '-' : raw)) + '</td>';
+      }
+      if (options.actionsHtml) {
+        bodyHtml += '<td class="cell-actions">' + options.actionsHtml(row) + '</td>';
+      }
+      bodyHtml += '</tr>';
+    }
+
+    containerEl.innerHTML =
+      '<div class="table-wrap"><table class="data-table"><thead><tr>' + headHtml + '</tr></thead><tbody>' + bodyHtml + '</tbody></table></div>';
+  }
+
+  /**
+   * pageInfo: { page, totalPages, total }  onPageChange: function(newPage)
+   */
+  function renderPagination(containerEl, pageInfo, onPageChange) {
+    if (!pageInfo || pageInfo.totalPages <= 1) { containerEl.innerHTML = ''; return; }
+    containerEl.innerHTML =
+      '<div class="pagination">' +
+        '<span>Page ' + pageInfo.page + ' of ' + pageInfo.totalPages + ' (' + pageInfo.total + ' total)</span>' +
+        '<button class="pagination__btn" id="pg-prev" type="button" ' + (pageInfo.page <= 1 ? 'disabled' : '') + '>Prev</button>' +
+        '<button class="pagination__btn" id="pg-next" type="button" ' + (pageInfo.page >= pageInfo.totalPages ? 'disabled' : '') + '>Next</button>' +
+      '</div>';
+    var prevBtn = qs('pg-prev');
+    var nextBtn = qs('pg-next');
+    if (prevBtn) { prevBtn.addEventListener('click', function () { onPageChange(pageInfo.page - 1); }); }
+    if (nextBtn) { nextBtn.addEventListener('click', function () { onPageChange(pageInfo.page + 1); }); }
+  }
+
+  /** Builds <option> tags from an array of {id, label} (or a plain field map
+   *  via idKey/labelKey) for a <select>. */
+  function buildOptionsHtml(items, idKey, labelKey, placeholder) {
+    var html = placeholder ? '<option value="">' + escapeHtml(placeholder) + '</option>' : '';
+    for (var i = 0; i < (items || []).length; i++) {
+      html += '<option value="' + escapeHtml(items[i][idKey]) + '">' + escapeHtml(items[i][labelKey]) + '</option>';
+    }
+    return html;
+  }
+</script>

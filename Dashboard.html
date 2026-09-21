@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <?!= include('CSS'); ?>
+</head>
+<body>
+  <?!= include('JS'); ?>
+  <?!= include('Components'); ?>
+  <script>
+    (function () {
+      var content = buildAppShell('dashboard', 'Dashboard');
+      if (!content) { return; }
+
+      var jcState = { page: 1, pageSize: 10, status: '' };
+
+      content.innerHTML =
+        '<div class="kpi-grid" id="kpi-grid"></div>' +
+        '<div class="card">' +
+          '<div class="card__header"><h3 class="card__title">TAT Breaches</h3></div>' +
+          '<div id="tat-breach-table"></div>' +
+        '</div>' +
+        '<div class="card">' +
+          '<div class="card__header">' +
+            '<h3 class="card__title">Job Card Summary</h3>' +
+            '<div class="toolbar">' +
+              '<select id="jc-status-filter">' +
+                '<option value="">All statuses</option>' +
+                '<option value="Pending">Pending</option>' +
+                '<option value="In Progress">In Progress</option>' +
+                '<option value="Completed">Completed</option>' +
+                '<option value="On Hold">On Hold</option>' +
+                '<option value="Cancelled">Cancelled</option>' +
+              '</select>' +
+            '</div>' +
+          '</div>' +
+          '<div id="jc-summary-table"></div>' +
+          '<div id="jc-summary-pagination"></div>' +
+        '</div>';
+
+      function statusChipsHtml(rows, labelKey, countKey) {
+        if (!rows || rows.length === 0) { return '<span class="text-muted">No data</span>'; }
+        var html = '';
+        for (var i = 0; i < rows.length; i++) {
+          html += statusBadgeHtml(rows[i][labelKey]) + ' <strong style="margin-right:10px;">' + rows[i][countKey] + '</strong>';
+        }
+        return html;
+      }
+
+      function loadKpis() {
+        return callServer('DashboardService.getOverviewKpis', getSessionId()).then(function (res) {
+          var k = res.data;
+          qs('kpi-grid').innerHTML =
+            '<div class="kpi-card"><div class="kpi-card__label">Job Cards</div><div class="kpi-card__value" style="font-size:14px; margin-top:10px;">' + statusChipsHtml(k.jobCardsByStatus, 'status', 'cnt') + '</div></div>' +
+            '<div class="kpi-card"><div class="kpi-card__label">Purchase Orders</div><div class="kpi-card__value" style="font-size:14px; margin-top:10px;">' + statusChipsHtml(k.purchaseOrdersByStatus, 'status', 'cnt') + '</div></div>' +
+            '<div class="kpi-card"><div class="kpi-card__label">On-Time Delivery</div><div class="kpi-card__value">' + (k.otd.otdPct === null ? '-' : k.otd.otdPct + '%') + '</div><div class="kpi-card__sub">' + k.otd.onTimeCount + ' of ' + k.otd.totalDispatched + ' dispatched on time</div></div>' +
+            '<div class="kpi-card"><div class="kpi-card__label">Overall QC Reject %</div><div class="kpi-card__value">' + (k.overallQualityRejectPct === null ? '-' : k.overallQualityRejectPct + '%') + '</div></div>' +
+            '<div class="kpi-card"><div class="kpi-card__label">Low Stock Items</div><div class="kpi-card__value">' + k.lowStockItemCount + '</div></div>' +
+            '<div class="kpi-card"><div class="kpi-card__label">TAT Breaches</div><div class="kpi-card__value">' + k.tatBreachCount + '</div></div>';
+        });
+      }
+
+      function loadTatBreaches() {
+        return callServer('DashboardService.getTatBreaches', getSessionId()).then(function (res) {
+          renderTable(qs('tat-breach-table'),
+            [
+              { key: 'job_card_no', label: 'Job Card' },
+              { key: 'stage_name', label: 'Stage' },
+              { key: 'status', label: 'Status', formatter: function (v) { return statusBadgeHtml(v); } },
+              { key: 'planned_end', label: 'Planned End', formatter: formatDateTime },
+              { key: 'actual_end', label: 'Actual End', formatter: formatDateTime },
+              { key: 'breach_hours', label: 'Breach (hrs)', formatter: function (v) { return v === null ? '-' : Number(v).toFixed(1); } }
+            ],
+            res.data.slice(0, 10),
+            { emptyMessage: 'No TAT breaches - everything is on schedule.' }
+          );
+        });
+      }
+
+      function loadJcSummary() {
+        return callServer('DashboardService.getJobCardSummary', getSessionId(), { status: jcState.status }, jcState.page, jcState.pageSize).then(function (res) {
+          renderTable(qs('jc-summary-table'),
+            [
+              { key: 'job_card_no', label: 'Job Card' },
+              { key: 'buyer', label: 'Buyer' },
+              { key: 'style', label: 'Style' },
+              { key: 'order_qty', label: 'Order Qty', formatter: formatNumber },
+              { key: 'completed_qty', label: 'Completed', formatter: formatNumber },
+              { key: 'production_pct', label: 'Production %', formatter: function (v) { return v === null ? '-' : v + '%'; } },
+              { key: 'current_stage', label: 'Current Stage' },
+              { key: 'current_status', label: 'Status', formatter: function (v) { return statusBadgeHtml(v); } },
+              { key: 'target_date', label: 'Target Date', formatter: formatDate }
+            ],
+            res.data.rows
+          );
+          renderPagination(qs('jc-summary-pagination'), res.data, function (newPage) { jcState.page = newPage; loadJcSummary(); });
+        });
+      }
+
+      qs('jc-status-filter').addEventListener('change', function () {
+        jcState.status = this.value; jcState.page = 1; loadJcSummary().catch(showError);
+      });
+
+      Promise.all([loadKpis(), loadTatBreaches(), loadJcSummary()]).catch(showError);
+    })();
+  </script>
+</body>
+</html>

@@ -1,0 +1,273 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <?!= include('CSS'); ?>
+</head>
+<body>
+  <?!= include('JS'); ?>
+  <?!= include('Components'); ?>
+  <script>
+    (function () {
+      var content = buildAppShell('inventory', 'Inventory');
+      if (!content) { return; }
+
+      var TXN_TYPES = ['Purchase', 'Receive', 'Issue', 'Return', 'Consume', 'Scrap'];
+      var fabricItems = [], inventoryItems = [], fabricatorVendors = [], jobCards = [];
+      var activeTab = 'fabric';
+
+      content.innerHTML =
+        '<div class="toolbar">' +
+          '<button class="btn" id="tab-fabric" type="button">Fabric Stock</button>' +
+          '<button class="btn btn--secondary" id="tab-inventory" type="button">General Inventory</button>' +
+          '<button class="btn btn--secondary" id="tab-fabricator" type="button">Fabricator Issues</button>' +
+        '</div>' +
+
+        '<div id="panel-fabric">' +
+          '<div class="card"><div class="card__header"><h3 class="card__title">Fabric Stock</h3>' +
+            '<button class="btn" id="fab-txn-btn" type="button">+ Record Transaction</button></div>' +
+            '<label class="flex-row"><input type="checkbox" id="fab-lowstock-only" style="width:auto;"> Low stock only</label>' +
+            '<div id="fab-stock-table" style="margin-top:10px;"></div>' +
+          '</div>' +
+          '<div class="card"><h3 class="card__title">Fabric Transaction Log</h3><div id="fab-txn-table"></div><div id="fab-txn-pagination"></div></div>' +
+        '</div>' +
+
+        '<div id="panel-inventory" style="display:none;">' +
+          '<div class="card"><div class="card__header"><h3 class="card__title">General Inventory Stock</h3>' +
+            '<button class="btn" id="inv-txn-btn" type="button">+ Record Transaction</button></div>' +
+            '<label class="flex-row"><input type="checkbox" id="inv-lowstock-only" style="width:auto;"> Low stock only</label>' +
+            '<div id="inv-stock-table" style="margin-top:10px;"></div>' +
+          '</div>' +
+          '<div class="card"><h3 class="card__title">Inventory Transaction Log</h3><div id="inv-txn-table"></div><div id="inv-txn-pagination"></div></div>' +
+        '</div>' +
+
+        '<div id="panel-fabricator" style="display:none;">' +
+          '<div class="card"><div class="card__header"><h3 class="card__title">Fabric Issued to Fabricators</h3>' +
+            '<button class="btn" id="ffi-issue-btn" type="button">+ Issue to Fabricator</button></div>' +
+            '<div id="ffi-table"></div><div id="ffi-pagination"></div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="modal-overlay" id="txn-modal">' +
+          '<div class="modal">' +
+            '<div class="modal__header"><h3 id="txn-modal-title">Record Transaction</h3><button class="modal__close" type="button" onclick="closeModal(\'txn-modal\')">&times;</button></div>' +
+            '<div class="modal__body">' +
+              '<input type="hidden" id="txn-material-type">' +
+              '<div class="form-grid">' +
+                '<div class="form-field"><label>Item *</label><select id="txn-itemId"></select></div>' +
+                '<div class="form-field"><label>Transaction Type *</label><select id="txn-type"></select></div>' +
+                '<div class="form-field"><label>Quantity *</label><input type="number" step="0.01" id="txn-qty" min="0.01"></div>' +
+                '<div class="form-field"><label>Job Card (optional)</label><select id="txn-jobcard"><option value="">None</option></select></div>' +
+                '<div class="form-field" id="txn-issuedto-field" style="display:none;"><label>Issued To</label><select id="txn-issuedTo"><option value="In-House">In-House</option><option value="Fabricator">Fabricator</option><option value="Sample">Sample</option></select></div>' +
+                '<div class="form-field"><label>Vendor (optional)</label><select id="txn-vendor"><option value="">None</option></select></div>' +
+                '<div class="form-field"><label>Remarks</label><input type="text" id="txn-remarks"></div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="modal__footer"><button class="btn btn--secondary" type="button" onclick="closeModal(\'txn-modal\')">Cancel</button><button class="btn" id="txn-submit" type="button">Save</button></div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="modal-overlay" id="ffi-issue-modal">' +
+          '<div class="modal">' +
+            '<div class="modal__header"><h3>Issue Fabric to Fabricator</h3><button class="modal__close" type="button" onclick="closeModal(\'ffi-issue-modal\')">&times;</button></div>' +
+            '<div class="modal__body">' +
+              '<div class="form-grid">' +
+                '<div class="form-field"><label>Fabric *</label><select id="ffi-fabric"></select></div>' +
+                '<div class="form-field"><label>Job Card *</label><select id="ffi-jobcard"></select></div>' +
+                '<div class="form-field"><label>Vendor *</label><select id="ffi-vendor"></select></div>' +
+                '<div class="form-field"><label>Quantity *</label><input type="number" step="0.01" id="ffi-qty"></div>' +
+                '<div class="form-field"><label>Expected Return Date</label><input type="date" id="ffi-expected"></div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="modal__footer"><button class="btn btn--secondary" type="button" onclick="closeModal(\'ffi-issue-modal\')">Cancel</button><button class="btn" id="ffi-issue-submit" type="button">Issue</button></div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="modal-overlay" id="ffi-return-modal">' +
+          '<div class="modal">' +
+            '<div class="modal__header"><h3>Record Fabricator Return</h3><button class="modal__close" type="button" onclick="closeModal(\'ffi-return-modal\')">&times;</button></div>' +
+            '<div class="modal__body">' +
+              '<input type="hidden" id="ffi-return-id">' +
+              '<div class="form-grid">' +
+                '<div class="form-field"><label>Returned Qty *</label><input type="number" step="0.01" id="ffi-return-qty"></div>' +
+                '<div class="form-field"><label>QC Status *</label><select id="ffi-return-qc"><option value="Passed">Passed</option><option value="Partial">Partial</option><option value="Failed">Failed</option></select></div>' +
+                '<div class="form-field"><label>QC Remarks</label><input type="text" id="ffi-return-remarks"></div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="modal__footer"><button class="btn btn--secondary" type="button" onclick="closeModal(\'ffi-return-modal\')">Cancel</button><button class="btn" id="ffi-return-submit" type="button">Save</button></div>' +
+          '</div>' +
+        '</div>';
+
+      function switchTab(tab) {
+        activeTab = tab;
+        qs('panel-fabric').style.display = tab === 'fabric' ? '' : 'none';
+        qs('panel-inventory').style.display = tab === 'inventory' ? '' : 'none';
+        qs('panel-fabricator').style.display = tab === 'fabricator' ? '' : 'none';
+        qs('tab-fabric').className = 'btn' + (tab === 'fabric' ? '' : ' btn--secondary');
+        qs('tab-inventory').className = 'btn' + (tab === 'inventory' ? '' : ' btn--secondary');
+        qs('tab-fabricator').className = 'btn' + (tab === 'fabricator' ? '' : ' btn--secondary');
+      }
+      qs('tab-fabric').addEventListener('click', function () { switchTab('fabric'); loadFabricStock(); loadFabricTxns(); });
+      qs('tab-inventory').addEventListener('click', function () { switchTab('inventory'); loadInventoryStock(); loadInventoryTxns(); });
+      qs('tab-fabricator').addEventListener('click', function () { switchTab('fabricator'); loadFabricatorIssues(); });
+
+      function loadFabricStock() {
+        return callServer('InventoryService.listFabricStock', getSessionId(), qs('fab-lowstock-only').checked).then(function (res) {
+          var rows = res.data.map(function (r) { r.label = r.design_name + (r.color ? ' / ' + r.color : ''); return r; });
+          renderTable(qs('fab-stock-table'),
+            [
+              { key: 'fabric_code', label: 'Code' }, { key: 'label', label: 'Design / Color' },
+              { key: 'unit', label: 'Unit' }, { key: 'closing_stock', label: 'Closing Stock', formatter: formatNumber },
+              { key: 'reorder_level', label: 'Reorder Level', formatter: formatNumber }
+            ], rows);
+        });
+      }
+      var fabTxnState = { page: 1, pageSize: 10 };
+      function loadFabricTxns() {
+        return callServer('InventoryService.listFabricTransactions', getSessionId(), {}, fabTxnState.page, fabTxnState.pageSize).then(function (res) {
+          renderTable(qs('fab-txn-table'),
+            [
+              { key: 'item_code', label: 'Fabric' }, { key: 'txn_type', label: 'Type', formatter: statusBadgeHtml },
+              { key: 'quantity', label: 'Qty', formatter: formatNumber }, { key: 'txn_date', label: 'Date', formatter: formatDate },
+              { key: 'remarks', label: 'Remarks' }
+            ], res.data.rows);
+          renderPagination(qs('fab-txn-pagination'), res.data, function (p) { fabTxnState.page = p; loadFabricTxns(); });
+        });
+      }
+
+      function loadInventoryStock() {
+        return callServer('InventoryService.listInventoryStock', getSessionId(), qs('inv-lowstock-only').checked).then(function (res) {
+          renderTable(qs('inv-stock-table'),
+            [
+              { key: 'item_code', label: 'Code' }, { key: 'item_name', label: 'Name' }, { key: 'category', label: 'Category' },
+              { key: 'unit', label: 'Unit' }, { key: 'closing_stock', label: 'Closing Stock', formatter: formatNumber },
+              { key: 'reorder_level', label: 'Reorder Level', formatter: formatNumber }
+            ], res.data);
+        });
+      }
+      var invTxnState = { page: 1, pageSize: 10 };
+      function loadInventoryTxns() {
+        return callServer('InventoryService.listInventoryTransactions', getSessionId(), {}, invTxnState.page, invTxnState.pageSize).then(function (res) {
+          renderTable(qs('inv-txn-table'),
+            [
+              { key: 'item_code', label: 'Item' }, { key: 'txn_type', label: 'Type', formatter: statusBadgeHtml },
+              { key: 'quantity', label: 'Qty', formatter: formatNumber }, { key: 'txn_date', label: 'Date', formatter: formatDate },
+              { key: 'remarks', label: 'Remarks' }
+            ], res.data.rows);
+          renderPagination(qs('inv-txn-pagination'), res.data, function (p) { invTxnState.page = p; loadInventoryTxns(); });
+        });
+      }
+
+      var ffiState = { page: 1, pageSize: 10 };
+      function loadFabricatorIssues() {
+        return callServer('InventoryService.listFabricatorIssues', getSessionId(), {}, ffiState.page, ffiState.pageSize).then(function (res) {
+          renderTable(qs('ffi-table'),
+            [
+              { key: 'job_card_no', label: 'Job Card' }, { key: 'vendor_name', label: 'Vendor' }, { key: 'fabric_code', label: 'Fabric' },
+              { key: 'issue_date', label: 'Issue Date', formatter: formatDate }, { key: 'expected_return_date', label: 'Expected', formatter: formatDate },
+              { key: 'returned_qty', label: 'Returned', formatter: formatNumber }, { key: 'qc_status', label: 'QC', formatter: statusBadgeHtml },
+              { key: 'status', label: 'Status', formatter: statusBadgeHtml }
+            ], res.data.rows,
+            { actionsHtml: function (row) { return row.status === 'Issued' ? '<button class="btn btn--sm" type="button" onclick="ffiOpenReturn(' + row.issue_id + ')">Record Return</button>' : '<span class="text-muted">-</span>'; } }
+          );
+          renderPagination(qs('ffi-pagination'), res.data, function (p) { ffiState.page = p; loadFabricatorIssues(); });
+        });
+      }
+
+      function loadReferenceData() {
+        return Promise.all([
+          callServer('MasterDataService.listFabricItems', getSessionId()),
+          callServer('MasterDataService.listInventoryItems', getSessionId()),
+          callServer('MasterDataService.listVendors', getSessionId(), 'Fabricator'),
+          callServer('JobCardService.listJobCards', getSessionId(), {}, 1, 200)
+        ]).then(function (results) {
+          fabricItems = results[0].data; inventoryItems = results[1].data; fabricatorVendors = results[2].data; jobCards = results[3].data.rows;
+        });
+      }
+
+      qs('fab-lowstock-only').addEventListener('change', loadFabricStock);
+      qs('inv-lowstock-only').addEventListener('change', loadInventoryStock);
+
+      // ---- Record Transaction modal (shared for both fabric and inventory) ----
+      function openTxnModal(materialType) {
+        qs('txn-material-type').value = materialType;
+        qs('txn-modal-title').textContent = materialType === 'fabric' ? 'Record Fabric Transaction' : 'Record Inventory Transaction';
+        var items = materialType === 'fabric' ? fabricItems : inventoryItems;
+        qs('txn-itemId').innerHTML = buildOptionsHtml(items.map(function (it) {
+          return { id: materialType === 'fabric' ? it.fabric_id : it.item_id, label: materialType === 'fabric' ? (it.fabric_code + ' - ' + it.design_name) : (it.item_code + ' - ' + it.item_name) };
+        }), 'id', 'label', 'Select an item');
+        qs('txn-type').innerHTML = buildOptionsHtml(TXN_TYPES.map(function (t) { return { id: t, label: t }; }), 'id', 'label');
+        qs('txn-jobcard').innerHTML = '<option value="">None</option>' + buildOptionsHtml(jobCards.map(function (jc) { return { id: jc.job_card_id, label: jc.job_card_no }; }), 'id', 'label');
+        qs('txn-vendor').innerHTML = '<option value="">None</option>' + buildOptionsHtml(fabricatorVendors, 'vendor_id', 'vendor_name');
+        qs('txn-issuedto-field').style.display = materialType === 'fabric' ? '' : 'none';
+        qs('txn-qty').value = ''; qs('txn-remarks').value = '';
+        openModal('txn-modal');
+      }
+      qs('fab-txn-btn').addEventListener('click', function () { openTxnModal('fabric'); });
+      qs('inv-txn-btn').addEventListener('click', function () { openTxnModal('inventory'); });
+
+      qs('txn-submit').addEventListener('click', function () {
+        var btn = this;
+        var materialType = qs('txn-material-type').value;
+        var input = {
+          itemId: Number(qs('txn-itemId').value),
+          txnType: qs('txn-type').value,
+          quantity: Number(qs('txn-qty').value),
+          jobCardId: qs('txn-jobcard').value ? Number(qs('txn-jobcard').value) : undefined,
+          vendorId: qs('txn-vendor').value ? Number(qs('txn-vendor').value) : undefined,
+          issuedTo: materialType === 'fabric' ? qs('txn-issuedTo').value : undefined,
+          remarks: qs('txn-remarks').value || undefined
+        };
+        var fnName = materialType === 'fabric' ? 'InventoryService.recordFabricTransaction' : 'InventoryService.recordInventoryTransaction';
+        setButtonLoading(btn, true, 'Saving...');
+        callServer(fnName, getSessionId(), input)
+          .then(function (res) {
+            showToast(res.message, 'success'); closeModal('txn-modal');
+            return materialType === 'fabric' ? Promise.all([loadFabricStock(), loadFabricTxns()]) : Promise.all([loadInventoryStock(), loadInventoryTxns()]);
+          })
+          .catch(showError)
+          .then(function () { setButtonLoading(btn, false); });
+      });
+
+      // ---- Fabricator issue/return ----
+      qs('ffi-issue-btn').addEventListener('click', function () {
+        qs('ffi-fabric').innerHTML = buildOptionsHtml(fabricItems.map(function (it) { return { id: it.fabric_id, label: it.fabric_code + ' - ' + it.design_name }; }), 'id', 'label', 'Select fabric');
+        qs('ffi-jobcard').innerHTML = buildOptionsHtml(jobCards.map(function (jc) { return { id: jc.job_card_id, label: jc.job_card_no }; }), 'id', 'label', 'Select job card');
+        qs('ffi-vendor').innerHTML = buildOptionsHtml(fabricatorVendors, 'vendor_id', 'vendor_name', 'Select vendor');
+        qs('ffi-qty').value = ''; qs('ffi-expected').value = '';
+        openModal('ffi-issue-modal');
+      });
+      qs('ffi-issue-submit').addEventListener('click', function () {
+        var btn = this;
+        var input = {
+          fabricId: Number(qs('ffi-fabric').value), jobCardId: Number(qs('ffi-jobcard').value),
+          vendorId: Number(qs('ffi-vendor').value), quantity: Number(qs('ffi-qty').value),
+          expectedReturnDate: qs('ffi-expected').value || undefined
+        };
+        setButtonLoading(btn, true, 'Issuing...');
+        callServer('InventoryService.issueFabricToFabricator', getSessionId(), input)
+          .then(function (res) { showToast(res.message, 'success'); closeModal('ffi-issue-modal'); return loadFabricatorIssues(); })
+          .catch(showError)
+          .then(function () { setButtonLoading(btn, false); });
+      });
+
+      window.ffiOpenReturn = function (issueId) {
+        qs('ffi-return-id').value = issueId;
+        qs('ffi-return-qty').value = ''; qs('ffi-return-remarks').value = '';
+        openModal('ffi-return-modal');
+      };
+      qs('ffi-return-submit').addEventListener('click', function () {
+        var btn = this;
+        setButtonLoading(btn, true, 'Saving...');
+        callServer('InventoryService.returnFabricFromFabricator', getSessionId(), Number(qs('ffi-return-id').value),
+          Number(qs('ffi-return-qty').value), qs('ffi-return-qc').value, qs('ffi-return-remarks').value || null)
+          .then(function (res) { showToast(res.message, 'success'); closeModal('ffi-return-modal'); return loadFabricatorIssues(); })
+          .catch(showError)
+          .then(function () { setButtonLoading(btn, false); });
+      });
+
+      loadReferenceData().then(function () { return Promise.all([loadFabricStock(), loadFabricTxns()]); }).catch(showError);
+    })();
+  </script>
+</body>
+</html>

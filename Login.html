@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <?!= include('CSS'); ?>
+</head>
+<body>
+  <div class="login-shell">
+    <div class="login-card">
+      <h1>Garment Manufacturing ERP</h1>
+      <p class="subtitle">Sign in to continue</p>
+      <form id="login-form">
+        <div class="form-field" style="margin-bottom:14px;">
+          <label for="login-username">Username</label>
+          <input type="text" id="login-username" autocomplete="username" required>
+        </div>
+        <div class="form-field" style="margin-bottom:6px;">
+          <label for="login-password">Password</label>
+          <input type="password" id="login-password" autocomplete="current-password" required>
+        </div>
+        <div class="field-error" id="login-error"></div>
+        <button type="submit" class="btn" id="login-submit-btn" style="width:100%; margin-top:10px;">Sign In</button>
+      </form>
+    </div>
+  </div>
+
+  <?!= include('JS'); ?>
+  <script>
+    (function () {
+      // If already signed in, skip straight to the dashboard.
+      var existing = getSession();
+      if (existing && existing.sessionId) { window.location.href = '?page=dashboard'; return; }
+
+      qs('login-form').addEventListener('submit', function (evt) {
+        evt.preventDefault();
+        var username = qs('login-username').value.trim();
+        var password = qs('login-password').value;
+        var errorEl = qs('login-error');
+        var btn = qs('login-submit-btn');
+        errorEl.textContent = '';
+
+        if (!username || !password) {
+          errorEl.textContent = 'Enter both username and password.';
+          return;
+        }
+
+        setButtonLoading(btn, true, 'Signing in...');
+        callServer('AuthService.login', username, password)
+          .then(function (response) {
+            setSession(response.data.sessionId, response.data.user);
+            window.location.href = '?page=dashboard';
+          })
+          .catch(function (err) {
+            errorEl.textContent = err.message || 'Login failed.';
+          })
+          .then(function () { setButtonLoading(btn, false); });
+      });
+    })();
+  </script>
+</body>
+</html>

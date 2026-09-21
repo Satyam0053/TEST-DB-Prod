@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <?!= include('CSS'); ?>
+</head>
+<body>
+  <?!= include('JS'); ?>
+  <?!= include('Components'); ?>
+  <script>
+    (function () {
+      var content = buildAppShell('artwork', 'Artwork');
+      if (!content) { return; }
+
+      var ARTWORK_TYPES = ['Printing', 'Embroidery', 'Sublimation', 'Other'];
+      var state = { status: '', page: 1, pageSize: 15 };
+      var jobCards = [], vendors = [];
+
+      content.innerHTML =
+        '<div class="card">' +
+          '<div class="card__header">' +
+            '<h3 class="card__title">Artwork Tracking</h3>' +
+            '<button class="btn" id="aw-new-btn" type="button">+ Issue Artwork</button>' +
+          '</div>' +
+          '<div class="toolbar">' +
+            '<select id="aw-status">' +
+              '<option value="">All statuses</option>' +
+              '<option value="Issued">Issued</option>' +
+              '<option value="Partially Received">Partially Received</option>' +
+              '<option value="Received">Received</option>' +
+              '<option value="Closed">Closed</option>' +
+            '</select>' +
+          '</div>' +
+          '<div id="aw-table"></div>' +
+          '<div id="aw-pagination"></div>' +
+        '</div>' +
+
+        '<div class="modal-overlay" id="aw-issue-modal">' +
+          '<div class="modal">' +
+            '<div class="modal__header"><h3>Issue Artwork</h3><button class="modal__close" type="button" onclick="closeModal(\'aw-issue-modal\')">&times;</button></div>' +
+            '<div class="modal__body">' +
+              '<div class="form-grid">' +
+                '<div class="form-field"><label>Job Card *</label><select id="aw-jobcard"></select></div>' +
+                '<div class="form-field"><label>Vendor *</label><select id="aw-vendor"></select></div>' +
+                '<div class="form-field"><label>Artwork Type *</label><select id="aw-type"></select></div>' +
+                '<div class="form-field"><label>Panels Issued Qty *</label><input type="number" id="aw-panelsIssued" min="1"></div>' +
+                '<div class="form-field"><label>Expected Date</label><input type="date" id="aw-expected"></div>' +
+                '<div class="form-field"><label>Remarks</label><input type="text" id="aw-remarks"></div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="modal__footer"><button class="btn btn--secondary" type="button" onclick="closeModal(\'aw-issue-modal\')">Cancel</button><button class="btn" id="aw-issue-submit" type="button">Issue</button></div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="modal-overlay" id="aw-receive-modal">' +
+          '<div class="modal">' +
+            '<div class="modal__header"><h3>Record Receipt / QC</h3><button class="modal__close" type="button" onclick="closeModal(\'aw-receive-modal\')">&times;</button></div>' +
+            '<div class="modal__body">' +
+              '<input type="hidden" id="aw-receive-id">' +
+              '<p class="text-muted" id="aw-receive-hint"></p>' +
+              '<div class="form-grid">' +
+                '<div class="form-field"><label>Panels Received (cumulative) *</label><input type="number" id="aw-receive-received"></div>' +
+                '<div class="form-field"><label>Accepted Qty *</label><input type="number" id="aw-receive-accepted"></div>' +
+                '<div class="form-field"><label>Rejected Qty *</label><input type="number" id="aw-receive-rejected"></div>' +
+                '<div class="form-field"><label>Remarks</label><input type="text" id="aw-receive-remarks"></div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="modal__footer"><button class="btn btn--secondary" type="button" onclick="closeModal(\'aw-receive-modal\')">Cancel</button><button class="btn" id="aw-receive-submit" type="button">Save</button></div>' +
+          '</div>' +
+        '</div>';
+
+      function actionsForRow_(row) {
+        var id = row.artwork_id;
+        var btns = '';
+        if (row.status !== 'Closed') {
+          btns += '<button class="btn btn--sm" type="button" onclick="awOpenReceive(' + id + ',' + row.panels_issued_qty + ')">Receive/QC</button>';
+        }
+        if (row.status === 'Received') {
+          btns += ' <button class="btn btn--secondary btn--sm" type="button" onclick="awClose(' + id + ')">Close</button>';
+        }
+        return btns || '<span class="text-muted">-</span>';
+      }
+
+      function loadList() {
+        var filters = {};
+        if (state.status) { filters.status = state.status; }
+        return callServer('ArtworkService.listArtwork', getSessionId(), filters, state.page, state.pageSize).then(function (res) {
+          renderTable(qs('aw-table'),
+            [
+              { key: 'job_card_no', label: 'Job Card' }, { key: 'vendor_name', label: 'Vendor' }, { key: 'artwork_type', label: 'Type' },
+              { key: 'panels_issued_qty', label: 'Issued', formatter: formatNumber }, { key: 'panels_received_qty', label: 'Received', formatter: formatNumber },
+              { key: 'yield_pct', label: 'Yield %', formatter: function (v) { return v === null ? '-' : v + '%'; } },
+              { key: 'reject_pct', label: 'Reject %', formatter: function (v) { return v === null ? '-' : v + '%'; } },
+              { key: 'aging_days', label: 'Aging (days)', formatter: formatNumber },
+              { key: 'status', label: 'Status', formatter: statusBadgeHtml }
+            ],
+            res.data.rows,
+            { actionsHtml: actionsForRow_ }
+          );
+          renderPagination(qs('aw-pagination'), res.data, function (p) { state.page = p; loadList().catch(showError); });
+        });
+      }
+
+      function loadReferenceData() {
+        return Promise.all([
+          callServer('JobCardService.listJobCards', getSessionId(), {}, 1, 200),
+          callServer('MasterDataService.listVendors', getSessionId(), 'Artwork')
+        ]).then(function (results) {
+          jobCards = results[0].data.rows;
+          vendors = results[1].data;
+        });
+      }
+
+      qs('aw-status').addEventListener('change', function () { state.status = this.value; state.page = 1; loadList().catch(showError); });
+
+      qs('aw-new-btn').addEventListener('click', function () {
+        qs('aw-jobcard').innerHTML = buildOptionsHtml(jobCards.map(function (jc) { return { id: jc.job_card_id, label: jc.job_card_no }; }), 'id', 'label', 'Select job card');
+        qs('aw-vendor').innerHTML = buildOptionsHtml(vendors, 'vendor_id', 'vendor_name', 'Select vendor');
+        qs('aw-type').innerHTML = buildOptionsHtml(ARTWORK_TYPES.map(function (t) { return { id: t, label: t }; }), 'id', 'label');
+        qs('aw-panelsIssued').value = ''; qs('aw-expected').value = ''; qs('aw-remarks').value = '';
+        openModal('aw-issue-modal');
+      });
+      qs('aw-issue-submit').addEventListener('click', function () {
+        var btn = this;
+        var input = {
+          jobCardId: Number(qs('aw-jobcard').value), vendorId: Number(qs('aw-vendor').value), artworkType: qs('aw-type').value,
+          panelsIssuedQty: Number(qs('aw-panelsIssued').value), expectedDate: qs('aw-expected').value || undefined, remarks: qs('aw-remarks').value || undefined
+        };
+        setButtonLoading(btn, true, 'Issuing...');
+        callServer('ArtworkService.issueArtwork', getSessionId(), input)
+          .then(function (res) { showToast(res.message, 'success'); closeModal('aw-issue-modal'); return loadList(); })
+          .catch(showError)
+          .then(function () { setButtonLoading(btn, false); });
+      });
+
+      window.awOpenReceive = function (artworkId, panelsIssued) {
+        qs('aw-receive-id').value = artworkId;
+        qs('aw-receive-hint').textContent = 'Panels issued: ' + panelsIssued;
+        qs('aw-receive-received').value = ''; qs('aw-receive-accepted').value = ''; qs('aw-receive-rejected').value = ''; qs('aw-receive-remarks').value = '';
+        openModal('aw-receive-modal');
+      };
+      qs('aw-receive-submit').addEventListener('click', function () {
+        var btn = this;
+        setButtonLoading(btn, true, 'Saving...');
+        callServer('ArtworkService.receiveArtwork', getSessionId(), Number(qs('aw-receive-id').value),
+          Number(qs('aw-receive-received').value), Number(qs('aw-receive-accepted').value), Number(qs('aw-receive-rejected').value), qs('aw-receive-remarks').value || null)
+          .then(function (res) { showToast(res.message, 'success'); closeModal('aw-receive-modal'); return loadList(); })
+          .catch(showError)
+          .then(function () { setButtonLoading(btn, false); });
+      });
+
+      window.awClose = function (artworkId) {
+        if (!confirm('Close this artwork record?')) { return; }
+        callServer('ArtworkService.closeArtwork', getSessionId(), artworkId)
+          .then(function (res) { showToast(res.message, 'success'); return loadList(); }).catch(showError);
+      };
+
+      loadReferenceData().then(function () { return loadList(); }).catch(showError);
+    })();
+  </script>
+</body>
+</html>

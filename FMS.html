@@ -1,0 +1,162 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <?!= include('CSS'); ?>
+</head>
+<body>
+  <?!= include('JS'); ?>
+  <?!= include('Components'); ?>
+  <script>
+    (function () {
+      var content = buildAppShell('fms', 'FMS Tracking');
+      if (!content) { return; }
+
+      var state = { stageId: null, status: '', page: 1, pageSize: 15 };
+      var employees = [];
+
+      content.innerHTML =
+        '<div class="card">' +
+          '<div class="card__header"><h3 class="card__title">Stage Work Queue</h3></div>' +
+          '<div class="toolbar">' +
+            '<select id="fms-stage"></select>' +
+            '<select id="fms-status">' +
+              '<option value="">All statuses</option>' +
+              '<option value="Pending">Pending</option>' +
+              '<option value="Started">Started</option>' +
+              '<option value="In Progress">In Progress</option>' +
+              '<option value="Hold">Hold</option>' +
+              '<option value="Done">Done</option>' +
+            '</select>' +
+          '</div>' +
+          '<div id="fms-table"></div>' +
+          '<div id="fms-pagination"></div>' +
+        '</div>' +
+
+        '<div class="modal-overlay" id="fms-start-modal">' +
+          '<div class="modal">' +
+            '<div class="modal__header"><h3>Start Stage</h3><button class="modal__close" type="button" onclick="closeModal(\'fms-start-modal\')">&times;</button></div>' +
+            '<div class="modal__body">' +
+              '<input type="hidden" id="fms-start-jc"><input type="hidden" id="fms-start-stage">' +
+              '<div class="form-field"><label>Assign To</label><select id="fms-start-assignee"></select></div>' +
+            '</div>' +
+            '<div class="modal__footer"><button class="btn btn--secondary" type="button" onclick="closeModal(\'fms-start-modal\')">Cancel</button><button class="btn" id="fms-start-submit" type="button">Start</button></div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="modal-overlay" id="fms-progress-modal">' +
+          '<div class="modal">' +
+            '<div class="modal__header"><h3>Record Progress</h3><button class="modal__close" type="button" onclick="closeModal(\'fms-progress-modal\')">&times;</button></div>' +
+            '<div class="modal__body">' +
+              '<input type="hidden" id="fms-progress-jc"><input type="hidden" id="fms-progress-stage">' +
+              '<p class="text-muted" id="fms-progress-hint"></p>' +
+              '<div class="form-grid">' +
+                '<div class="form-field"><label>Completed Qty (cumulative) *</label><input type="number" id="fms-progress-qty" min="0"></div>' +
+                '<div class="form-field"><label>Remarks</label><input type="text" id="fms-progress-remarks"></div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="modal__footer"><button class="btn btn--secondary" type="button" onclick="closeModal(\'fms-progress-modal\')">Cancel</button><button class="btn" id="fms-progress-submit" type="button">Save Progress</button></div>' +
+          '</div>' +
+        '</div>';
+
+      function actionsForRow_(row) {
+        var jc = row.job_card_id, st = state.stageId;
+        if (row.status === 'Pending') {
+          return '<button class="btn btn--sm" type="button" onclick="fmsOpenStart(' + jc + ',' + st + ')">Start</button>';
+        }
+        if (row.status === 'Started' || row.status === 'In Progress') {
+          return '<button class="btn btn--sm" type="button" onclick="fmsOpenProgress(' + jc + ',' + st + ',' + row.quantity + ',' + row.completed_qty + ')">Progress</button>' +
+            ' <button class="btn btn--secondary btn--sm" type="button" onclick="fmsHold(' + jc + ',' + st + ')">Hold</button>';
+        }
+        if (row.status === 'Hold') {
+          return '<button class="btn btn--secondary btn--sm" type="button" onclick="fmsResume(' + jc + ',' + st + ')">Resume</button>';
+        }
+        return '<span class="text-muted">-</span>';
+      }
+
+      function loadQueue() {
+        if (!state.stageId) { return Promise.resolve(); }
+        return callServer('FMSService.listStageQueue', getSessionId(), state.stageId, state.status, state.page, state.pageSize)
+          .then(function (res) {
+            renderTable(qs('fms-table'),
+              [
+                { key: 'job_card_no', label: 'Job Card' },
+                { key: 'buyer_name', label: 'Buyer' },
+                { key: 'style_no', label: 'Style' },
+                { key: 'status', label: 'Status', formatter: statusBadgeHtml },
+                { key: 'quantity', label: 'Qty', formatter: formatNumber },
+                { key: 'completed_qty', label: 'Completed', formatter: formatNumber },
+                { key: 'planned_end', label: 'Planned End', formatter: formatDateTime }
+              ],
+              res.data.rows,
+              { actionsHtml: actionsForRow_ }
+            );
+            renderPagination(qs('fms-pagination'), res.data, function (p) { state.page = p; loadQueue().catch(showError); });
+          });
+      }
+
+      function loadStages() {
+        return callServer('MasterDataService.listFmsStages', getSessionId()).then(function (res) {
+          qs('fms-stage').innerHTML = buildOptionsHtml(res.data, 'stage_id', 'stage_name');
+          if (res.data.length > 0) { state.stageId = res.data[0].stage_id; }
+        });
+      }
+
+      function loadEmployees() {
+        return callServer('MasterDataService.listEmployees', getSessionId()).then(function (res) {
+          employees = res.data;
+          qs('fms-start-assignee').innerHTML = buildOptionsHtml(employees, 'employee_id', 'full_name', 'Unassigned');
+        });
+      }
+
+      qs('fms-stage').addEventListener('change', function () { state.stageId = Number(this.value); state.page = 1; loadQueue().catch(showError); });
+      qs('fms-status').addEventListener('change', function () { state.status = this.value; state.page = 1; loadQueue().catch(showError); });
+
+      window.fmsOpenStart = function (jobCardId, stageId) {
+        qs('fms-start-jc').value = jobCardId; qs('fms-start-stage').value = stageId;
+        openModal('fms-start-modal');
+      };
+      qs('fms-start-submit').addEventListener('click', function () {
+        var btn = this;
+        var assignee = qs('fms-start-assignee').value;
+        setButtonLoading(btn, true, 'Starting...');
+        callServer('FMSService.startStage', getSessionId(), Number(qs('fms-start-jc').value), Number(qs('fms-start-stage').value), assignee ? Number(assignee) : null)
+          .then(function (res) { showToast(res.message, 'success'); closeModal('fms-start-modal'); return loadQueue(); })
+          .catch(showError)
+          .then(function () { setButtonLoading(btn, false); });
+      });
+
+      window.fmsOpenProgress = function (jobCardId, stageId, qty, completedQty) {
+        qs('fms-progress-jc').value = jobCardId; qs('fms-progress-stage').value = stageId;
+        qs('fms-progress-qty').value = completedQty; qs('fms-progress-qty').setAttribute('max', qty);
+        qs('fms-progress-hint').textContent = 'Stage quantity: ' + qty + ' (currently completed: ' + completedQty + ')';
+        qs('fms-progress-remarks').value = '';
+        openModal('fms-progress-modal');
+      };
+      qs('fms-progress-submit').addEventListener('click', function () {
+        var btn = this;
+        setButtonLoading(btn, true, 'Saving...');
+        callServer('FMSService.updateStageProgress', getSessionId(), Number(qs('fms-progress-jc').value), Number(qs('fms-progress-stage').value),
+          Number(qs('fms-progress-qty').value), qs('fms-progress-remarks').value || null)
+          .then(function (res) { showToast(res.message, 'success'); closeModal('fms-progress-modal'); return loadQueue(); })
+          .catch(showError)
+          .then(function () { setButtonLoading(btn, false); });
+      });
+
+      window.fmsHold = function (jobCardId, stageId) {
+        var remarks = prompt('Reason for hold (optional):') || '';
+        callServer('FMSService.holdStage', getSessionId(), jobCardId, stageId, remarks)
+          .then(function (res) { showToast(res.message, 'success'); return loadQueue(); })
+          .catch(showError);
+      };
+      window.fmsResume = function (jobCardId, stageId) {
+        callServer('FMSService.resumeStage', getSessionId(), jobCardId, stageId)
+          .then(function (res) { showToast(res.message, 'success'); return loadQueue(); })
+          .catch(showError);
+      };
+
+      Promise.all([loadStages(), loadEmployees()]).then(function () { return loadQueue(); }).catch(showError);
+    })();
+  </script>
+</body>
+</html>

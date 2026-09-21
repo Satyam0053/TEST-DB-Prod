@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <?!= include('CSS'); ?>
+</head>
+<body>
+  <?!= include('JS'); ?>
+  <?!= include('Components'); ?>
+  <script>
+    (function () {
+      var content = buildAppShell('quality', 'Quality');
+      if (!content) { return; }
+
+      var DEFECT_TYPES = ['Loose Thread', 'Stain', 'Measurement Issue', 'Stitching Defect', 'Fabric Defect', 'Print Defect', 'Embroidery Defect', 'Button Defect', 'Other'];
+      var state = { page: 1, pageSize: 15 };
+      var jobCards = [], stages = [], employees = [], defectRows = 0;
+
+      content.innerHTML =
+        '<div class="card"><h3 class="card__title">Top Defects</h3><div id="defect-summary-table"></div></div>' +
+        '<div class="card">' +
+          '<div class="card__header">' +
+            '<h3 class="card__title">QC Inspections</h3>' +
+            '<button class="btn" id="qi-new-btn" type="button">+ Record Inspection</button>' +
+          '</div>' +
+          '<div id="qi-table"></div>' +
+          '<div id="qi-pagination"></div>' +
+        '</div>' +
+
+        '<div class="modal-overlay" id="qi-detail-modal">' +
+          '<div class="modal" style="max-width:640px;">' +
+            '<div class="modal__header"><h3>Inspection Detail</h3><button class="modal__close" type="button" onclick="closeModal(\'qi-detail-modal\')">&times;</button></div>' +
+            '<div class="modal__body" id="qi-detail-body"></div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="modal-overlay" id="qi-create-modal">' +
+          '<div class="modal" style="max-width:640px;">' +
+            '<div class="modal__header"><h3>Record Inspection</h3><button class="modal__close" type="button" onclick="closeModal(\'qi-create-modal\')">&times;</button></div>' +
+            '<div class="modal__body">' +
+              '<div class="form-grid">' +
+                '<div class="form-field"><label>Job Card *</label><select id="qi-jobcard"></select></div>' +
+                '<div class="form-field"><label>Stage</label><select id="qi-stage"><option value="">Not stage-specific</option></select></div>' +
+                '<div class="form-field"><label>Inspector</label><select id="qi-inspector"><option value="">Unassigned</option></select></div>' +
+                '<div class="form-field"><label>Checked Qty *</label><input type="number" id="qi-checked" min="1"></div>' +
+                '<div class="form-field"><label>Passed Qty *</label><input type="number" id="qi-passed" min="0"></div>' +
+                '<div class="form-field"><label>Rejected Qty *</label><input type="number" id="qi-rejected" min="0" value="0"></div>' +
+                '<div class="form-field"><label>Rework Qty *</label><input type="number" id="qi-rework" min="0" value="0"></div>' +
+                '<div class="form-field"><label>Remarks</label><input type="text" id="qi-remarks"></div>' +
+              '</div>' +
+              '<h4 style="margin-top:16px;">Defect Lines</h4>' +
+              '<div id="qi-defect-rows"></div>' +
+              '<button class="btn btn--secondary btn--sm" type="button" id="qi-add-defect">+ Add Defect Line</button>' +
+            '</div>' +
+            '<div class="modal__footer"><button class="btn btn--secondary" type="button" onclick="closeModal(\'qi-create-modal\')">Cancel</button><button class="btn" id="qi-create-submit" type="button">Save Inspection</button></div>' +
+          '</div>' +
+        '</div>';
+
+      function loadDefectSummary() {
+        return callServer('QualityService.getDefectSummary', getSessionId(), {}).then(function (res) {
+          renderTable(qs('defect-summary-table'),
+            [
+              { key: 'defect_type', label: 'Defect Type' },
+              { key: 'total_qty', label: 'Total Qty', formatter: formatNumber },
+              { key: 'occurrence_count', label: 'Occurrences', formatter: formatNumber }
+            ], res.data, { emptyMessage: 'No defects recorded yet.' });
+        });
+      }
+
+      function loadList() {
+        return callServer('QualityService.listInspections', getSessionId(), {}, state.page, state.pageSize).then(function (res) {
+          renderTable(qs('qi-table'),
+            [
+              { key: 'job_card_no', label: 'Job Card' }, { key: 'stage_name', label: 'Stage' },
+              { key: 'checked_qty', label: 'Checked', formatter: formatNumber }, { key: 'passed_qty', label: 'Passed', formatter: formatNumber },
+              { key: 'rejected_qty', label: 'Rejected', formatter: formatNumber }, { key: 'rework_qty', label: 'Rework', formatter: formatNumber },
+              { key: 'inspector_name', label: 'Inspector' }, { key: 'inspection_date', label: 'Date', formatter: formatDate }
+            ],
+            res.data.rows,
+            { actionsHtml: function (row) { return '<button class="btn btn--secondary btn--sm" type="button" onclick="qiViewDetail(' + row.inspection_id + ')">View</button>'; } }
+          );
+          renderPagination(qs('qi-pagination'), res.data, function (p) { state.page = p; loadList().catch(showError); });
+        });
+      }
+
+      function loadReferenceData() {
+        return Promise.all([
+          callServer('JobCardService.listJobCards', getSessionId(), {}, 1, 200),
+          callServer('MasterDataService.listFmsStages', getSessionId()),
+          callServer('MasterDataService.listEmployees', getSessionId())
+        ]).then(function (results) {
+          jobCards = results[0].data.rows; stages = results[1].data; employees = results[2].data;
+        });
+      }
+
+      window.qiViewDetail = function (inspectionId) {
+        callServer('QualityService.getInspection', getSessionId(), inspectionId).then(function (res) {
+          var insp = res.data;
+          var defectsHtml = '';
+          for (var i = 0; i < insp.defects.length; i++) {
+            defectsHtml += '<tr><td>' + escapeHtml(insp.defects[i].defect_type) + '</td><td>' + formatNumber(insp.defects[i].qty) + '</td><td>' + escapeHtml(insp.defects[i].remarks || '-') + '</td></tr>';
+          }
+          qs('qi-detail-body').innerHTML =
+            '<div class="form-grid" style="margin-bottom:16px;">' +
+              '<div><strong>Job Card</strong><div>' + escapeHtml(insp.job_card_no) + '</div></div>' +
+              '<div><strong>Stage</strong><div>' + escapeHtml(insp.stage_name || '-') + '</div></div>' +
+              '<div><strong>Checked / Passed</strong><div>' + formatNumber(insp.checked_qty) + ' / ' + formatNumber(insp.passed_qty) + '</div></div>' +
+              '<div><strong>Rejected / Rework</strong><div>' + formatNumber(insp.rejected_qty) + ' / ' + formatNumber(insp.rework_qty) + '</div></div>' +
+              '<div><strong>Inspector</strong><div>' + escapeHtml(insp.inspector_name || '-') + '</div></div>' +
+              '<div><strong>Date</strong><div>' + formatDate(insp.inspection_date) + '</div></div>' +
+            '</div>' +
+            '<h4>Defect Lines</h4>' +
+            '<div class="table-wrap"><table class="data-table"><thead><tr><th>Defect Type</th><th>Qty</th><th>Remarks</th></tr></thead><tbody>' +
+            (defectsHtml || '<tr><td colspan="3" class="text-muted">No defect lines.</td></tr>') + '</tbody></table></div>';
+          openModal('qi-detail-modal');
+        }).catch(showError);
+      };
+
+      function addDefectRow() {
+        var rowId = 'defect-row-' + (defectRows++);
+        var el = document.createElement('div');
+        el.className = 'form-grid';
+        el.id = rowId;
+        el.style.marginBottom = '8px';
+        el.innerHTML =
+          '<div class="form-field"><select class="defect-type-select">' + buildOptionsHtml(DEFECT_TYPES.map(function (t) { return { id: t, label: t }; }), 'id', 'label') + '</select></div>' +
+          '<div class="form-field"><input type="number" class="defect-qty-input" placeholder="Qty" min="1"></div>' +
+          '<div class="form-field"><input type="text" class="defect-remarks-input" placeholder="Remarks"></div>' +
+          '<div class="form-field"><button class="btn btn--secondary btn--sm" type="button" onclick="document.getElementById(\'' + rowId + '\').remove()">Remove</button></div>';
+        qs('qi-defect-rows').appendChild(el);
+      }
+      qs('qi-add-defect').addEventListener('click', addDefectRow);
+
+      qs('qi-new-btn').addEventListener('click', function () {
+        qs('qi-jobcard').innerHTML = buildOptionsHtml(jobCards.map(function (jc) { return { id: jc.job_card_id, label: jc.job_card_no }; }), 'id', 'label', 'Select job card');
+        qs('qi-stage').innerHTML = '<option value="">Not stage-specific</option>' + buildOptionsHtml(stages, 'stage_id', 'stage_name');
+        qs('qi-inspector').innerHTML = '<option value="">Unassigned</option>' + buildOptionsHtml(employees, 'employee_id', 'full_name');
+        qs('qi-checked').value = ''; qs('qi-passed').value = ''; qs('qi-rejected').value = '0'; qs('qi-rework').value = '0'; qs('qi-remarks').value = '';
+        qs('qi-defect-rows').innerHTML = '';
+        openModal('qi-create-modal');
+      });
+
+      qs('qi-create-submit').addEventListener('click', function () {
+        var btn = this;
+        var defects = [];
+        var rowEls = qs('qi-defect-rows').children;
+        for (var i = 0; i < rowEls.length; i++) {
+          var typeSel = rowEls[i].querySelector('.defect-type-select');
+          var qtyInput = rowEls[i].querySelector('.defect-qty-input');
+          var remarksInput = rowEls[i].querySelector('.defect-remarks-input');
+          if (qtyInput.value) {
+            defects.push({ defectType: typeSel.value, qty: Number(qtyInput.value), remarks: remarksInput.value || undefined });
+          }
+        }
+        var input = {
+          jobCardId: Number(qs('qi-jobcard').value),
+          stageId: qs('qi-stage').value ? Number(qs('qi-stage').value) : undefined,
+          inspectorId: qs('qi-inspector').value ? Number(qs('qi-inspector').value) : undefined,
+          checkedQty: Number(qs('qi-checked').value),
+          passedQty: Number(qs('qi-passed').value),
+          rejectedQty: Number(qs('qi-rejected').value),
+          reworkQty: Number(qs('qi-rework').value),
+          remarks: qs('qi-remarks').value || undefined,
+          defects: defects
+        };
+        setButtonLoading(btn, true, 'Saving...');
+        callServer('QualityService.recordInspection', getSessionId(), input)
+          .then(function (res) {
+            showToast(res.message, 'success'); closeModal('qi-create-modal');
+            return Promise.all([loadList(), loadDefectSummary()]);
+          })
+          .catch(showError)
+          .then(function () { setButtonLoading(btn, false); });
+      });
+
+      loadReferenceData().then(function () { return Promise.all([loadList(), loadDefectSummary()]); }).catch(showError);
+    })();
+  </script>
+</body>
+</html>

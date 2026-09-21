@@ -1,0 +1,266 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <?!= include('CSS'); ?>
+</head>
+<body>
+  <?!= include('JS'); ?>
+  <?!= include('Components'); ?>
+  <script>
+    (function () {
+      var content = buildAppShell('users', 'Users & Roles');
+      if (!content) { return; }
+
+      var roles = [], permissions = [];
+      var userState = { page: 1, pageSize: 15 };
+
+      content.innerHTML =
+        '<div class="toolbar">' +
+          '<button class="btn" id="tab-users" type="button">Users</button>' +
+          '<button class="btn btn--secondary" id="tab-roles" type="button">Roles &amp; Permissions</button>' +
+        '</div>' +
+
+        '<div id="panel-users">' +
+          '<div class="card"><div class="card__header"><h3 class="card__title">Users</h3>' +
+            '<button class="btn" id="usr-new-btn" type="button">+ New User</button></div>' +
+            '<div id="usr-table"></div><div id="usr-pagination"></div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div id="panel-roles" style="display:none;">' +
+          '<div class="card"><div class="card__header"><h3 class="card__title">Roles</h3>' +
+            '<button class="btn" id="role-new-btn" type="button">+ New Role</button></div>' +
+            '<div id="role-table"></div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="modal-overlay" id="usr-create-modal">' +
+          '<div class="modal">' +
+            '<div class="modal__header"><h3>New User</h3><button class="modal__close" type="button" onclick="closeModal(\'usr-create-modal\')">&times;</button></div>' +
+            '<div class="modal__body">' +
+              '<div class="form-grid">' +
+                '<div class="form-field"><label>Username *</label><input type="text" id="usr-username"></div>' +
+                '<div class="form-field"><label>Full Name *</label><input type="text" id="usr-fullName"></div>' +
+                '<div class="form-field"><label>Email</label><input type="email" id="usr-email"></div>' +
+                '<div class="form-field"><label>Phone</label><input type="text" id="usr-phone"></div>' +
+                '<div class="form-field"><label>Role *</label><select id="usr-role"></select></div>' +
+                '<div class="form-field"><label>Initial Password *</label><input type="password" id="usr-password"><span class="hint">At least 8 characters</span></div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="modal__footer"><button class="btn btn--secondary" type="button" onclick="closeModal(\'usr-create-modal\')">Cancel</button><button class="btn" id="usr-create-submit" type="button">Create User</button></div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="modal-overlay" id="usr-edit-modal">' +
+          '<div class="modal">' +
+            '<div class="modal__header"><h3>Edit User</h3><button class="modal__close" type="button" onclick="closeModal(\'usr-edit-modal\')">&times;</button></div>' +
+            '<div class="modal__body">' +
+              '<input type="hidden" id="usr-edit-id">' +
+              '<div class="form-grid">' +
+                '<div class="form-field"><label>Full Name</label><input type="text" id="usr-edit-fullName"></div>' +
+                '<div class="form-field"><label>Email</label><input type="email" id="usr-edit-email"></div>' +
+                '<div class="form-field"><label>Phone</label><input type="text" id="usr-edit-phone"></div>' +
+                '<div class="form-field"><label>Role</label><select id="usr-edit-role"></select></div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="modal__footer"><button class="btn btn--secondary" type="button" onclick="closeModal(\'usr-edit-modal\')">Cancel</button><button class="btn" id="usr-edit-submit" type="button">Save Changes</button></div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="modal-overlay" id="usr-password-modal">' +
+          '<div class="modal">' +
+            '<div class="modal__header"><h3>Reset Password</h3><button class="modal__close" type="button" onclick="closeModal(\'usr-password-modal\')">&times;</button></div>' +
+            '<div class="modal__body">' +
+              '<input type="hidden" id="usr-password-id">' +
+              '<div class="form-field"><label>New Password *</label><input type="password" id="usr-new-password"><span class="hint">At least 8 characters. The user will be signed out everywhere.</span></div>' +
+            '</div>' +
+            '<div class="modal__footer"><button class="btn btn--secondary" type="button" onclick="closeModal(\'usr-password-modal\')">Cancel</button><button class="btn" id="usr-password-submit" type="button">Reset Password</button></div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="modal-overlay" id="role-create-modal">' +
+          '<div class="modal">' +
+            '<div class="modal__header"><h3>New Role</h3><button class="modal__close" type="button" onclick="closeModal(\'role-create-modal\')">&times;</button></div>' +
+            '<div class="modal__body">' +
+              '<div class="form-grid">' +
+                '<div class="form-field"><label>Role Name *</label><input type="text" id="role-name"></div>' +
+                '<div class="form-field"><label>Description</label><input type="text" id="role-description"></div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="modal__footer"><button class="btn btn--secondary" type="button" onclick="closeModal(\'role-create-modal\')">Cancel</button><button class="btn" id="role-create-submit" type="button">Create Role</button></div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="modal-overlay" id="role-permissions-modal">' +
+          '<div class="modal" style="max-width:640px;">' +
+            '<div class="modal__header"><h3 id="role-permissions-title">Permissions</h3><button class="modal__close" type="button" onclick="closeModal(\'role-permissions-modal\')">&times;</button></div>' +
+            '<div class="modal__body"><input type="hidden" id="role-permissions-roleId"><div id="role-permissions-list"></div></div>' +
+            '<div class="modal__footer"><button class="btn btn--secondary" type="button" onclick="closeModal(\'role-permissions-modal\')">Cancel</button><button class="btn" id="role-permissions-submit" type="button">Save Permissions</button></div>' +
+          '</div>' +
+        '</div>';
+
+      function switchTab(tab) {
+        qs('panel-users').style.display = tab === 'users' ? '' : 'none';
+        qs('panel-roles').style.display = tab === 'roles' ? '' : 'none';
+        qs('tab-users').className = 'btn' + (tab === 'users' ? '' : ' btn--secondary');
+        qs('tab-roles').className = 'btn' + (tab === 'roles' ? '' : ' btn--secondary');
+      }
+      qs('tab-users').addEventListener('click', function () { switchTab('users'); loadUsers(); });
+      qs('tab-roles').addEventListener('click', function () { switchTab('roles'); loadRoles(); });
+
+      function loadUsers() {
+        return callServer('UserService.listUsers', getSessionId(), {}, userState.page, userState.pageSize).then(function (res) {
+          renderTable(qs('usr-table'),
+            [
+              { key: 'username', label: 'Username' }, { key: 'full_name', label: 'Full Name' }, { key: 'role_name', label: 'Role' },
+              { key: 'email', label: 'Email' },
+              { key: 'is_active', label: 'Active', formatter: function (v) { return statusBadgeHtml(Number(v) === 1 ? 'Active' : 'Inactive'); } },
+              { key: 'last_login_at', label: 'Last Login', formatter: formatDateTime }
+            ],
+            res.data.rows,
+            {
+              actionsHtml: function (row) {
+                return '<button class="btn btn--secondary btn--sm" type="button" onclick="usrOpenEdit(' + row.user_id + ')">Edit</button>' +
+                  ' <button class="btn btn--secondary btn--sm" type="button" onclick="usrOpenPassword(' + row.user_id + ')">Reset PW</button>' +
+                  ' <button class="btn btn--sm ' + (Number(row.is_active) === 1 ? 'btn--danger' : 'btn--success') + '" type="button" onclick="usrToggleActive(' + row.user_id + ',' + (Number(row.is_active) === 1 ? 'false' : 'true') + ')">' +
+                  (Number(row.is_active) === 1 ? 'Deactivate' : 'Activate') + '</button>';
+              }
+            }
+          );
+          renderPagination(qs('usr-pagination'), res.data, function (p) { userState.page = p; loadUsers().catch(showError); });
+        });
+      }
+
+      function loadRoles() {
+        return callServer('UserService.listRoles', getSessionId()).then(function (res) {
+          roles = res.data;
+          renderTable(qs('role-table'),
+            [
+              { key: 'role_name', label: 'Role' }, { key: 'description', label: 'Description' },
+              { key: 'is_active', label: 'Active', formatter: function (v) { return statusBadgeHtml(Number(v) === 1 ? 'Active' : 'Inactive'); } }
+            ],
+            roles,
+            { actionsHtml: function (row) { return '<button class="btn btn--secondary btn--sm" type="button" onclick="roleOpenPermissions(' + row.role_id + ',\'' + escapeHtml(row.role_name) + '\')">Permissions</button>'; } }
+          );
+        });
+      }
+
+      function loadReferenceData() {
+        return Promise.all([callServer('UserService.listRoles', getSessionId()), callServer('UserService.listPermissions', getSessionId())])
+          .then(function (results) { roles = results[0].data; permissions = results[1].data; });
+      }
+
+      qs('usr-new-btn').addEventListener('click', function () {
+        qs('usr-role').innerHTML = buildOptionsHtml(roles, 'role_id', 'role_name', 'Select a role');
+        qs('usr-username').value = ''; qs('usr-fullName').value = ''; qs('usr-email').value = ''; qs('usr-phone').value = ''; qs('usr-password').value = '';
+        openModal('usr-create-modal');
+      });
+      qs('usr-create-submit').addEventListener('click', function () {
+        var btn = this;
+        var input = {
+          username: qs('usr-username').value.trim(), fullName: qs('usr-fullName').value.trim(),
+          email: qs('usr-email').value || undefined, phone: qs('usr-phone').value || undefined,
+          roleId: Number(qs('usr-role').value), initialPassword: qs('usr-password').value
+        };
+        setButtonLoading(btn, true, 'Creating...');
+        callServer('UserService.createUser', getSessionId(), input)
+          .then(function (res) { showToast(res.message, 'success'); closeModal('usr-create-modal'); return loadUsers(); })
+          .catch(showError)
+          .then(function () { setButtonLoading(btn, false); });
+      });
+
+      window.usrOpenEdit = function (userId) {
+        callServer('UserService.getUser', getSessionId(), userId).then(function (res) {
+          var u = res.data;
+          qs('usr-edit-id').value = u.user_id;
+          qs('usr-edit-fullName').value = u.full_name; qs('usr-edit-email').value = u.email || ''; qs('usr-edit-phone').value = u.phone || '';
+          qs('usr-edit-role').innerHTML = buildOptionsHtml(roles, 'role_id', 'role_name');
+          qs('usr-edit-role').value = u.role_id;
+          openModal('usr-edit-modal');
+        }).catch(showError);
+      };
+      qs('usr-edit-submit').addEventListener('click', function () {
+        var btn = this;
+        var input = { fullName: qs('usr-edit-fullName').value, email: qs('usr-edit-email').value || null, phone: qs('usr-edit-phone').value || null, roleId: Number(qs('usr-edit-role').value) };
+        setButtonLoading(btn, true, 'Saving...');
+        callServer('UserService.updateUser', getSessionId(), Number(qs('usr-edit-id').value), input)
+          .then(function (res) { showToast(res.message, 'success'); closeModal('usr-edit-modal'); return loadUsers(); })
+          .catch(showError)
+          .then(function () { setButtonLoading(btn, false); });
+      });
+
+      window.usrOpenPassword = function (userId) {
+        qs('usr-password-id').value = userId; qs('usr-new-password').value = '';
+        openModal('usr-password-modal');
+      };
+      qs('usr-password-submit').addEventListener('click', function () {
+        var btn = this;
+        setButtonLoading(btn, true, 'Saving...');
+        callServer('UserService.resetUserPassword', getSessionId(), Number(qs('usr-password-id').value), qs('usr-new-password').value)
+          .then(function (res) { showToast(res.message, 'success'); closeModal('usr-password-modal'); })
+          .catch(showError)
+          .then(function () { setButtonLoading(btn, false); });
+      });
+
+      window.usrToggleActive = function (userId, makeActive) {
+        if (!confirm((makeActive ? 'Activate' : 'Deactivate') + ' this user?')) { return; }
+        callServer('UserService.setUserActive', getSessionId(), userId, makeActive)
+          .then(function (res) { showToast(res.message, 'success'); return loadUsers(); }).catch(showError);
+      };
+
+      qs('role-new-btn').addEventListener('click', function () {
+        qs('role-name').value = ''; qs('role-description').value = '';
+        openModal('role-create-modal');
+      });
+      qs('role-create-submit').addEventListener('click', function () {
+        var btn = this;
+        setButtonLoading(btn, true, 'Creating...');
+        callServer('UserService.createRole', getSessionId(), qs('role-name').value.trim(), qs('role-description').value || undefined)
+          .then(function (res) { showToast(res.message, 'success'); closeModal('role-create-modal'); return loadRoles(); })
+          .catch(showError)
+          .then(function () { setButtonLoading(btn, false); });
+      });
+
+      window.roleOpenPermissions = function (roleId, roleName) {
+        qs('role-permissions-roleId').value = roleId;
+        qs('role-permissions-title').textContent = 'Permissions - ' + roleName;
+        callServer('UserService.getRolePermissions', getSessionId(), roleId).then(function (res) {
+          var assignedIds = res.data.map(function (p) { return p.permission_id; });
+          var html = '';
+          var byModule = {};
+          for (var i = 0; i < permissions.length; i++) {
+            var p = permissions[i];
+            byModule[p.module] = byModule[p.module] || [];
+            byModule[p.module].push(p);
+          }
+          for (var moduleName in byModule) {
+            if (!byModule.hasOwnProperty(moduleName)) { continue; }
+            html += '<h4>' + escapeHtml(moduleName) + '</h4>';
+            for (var j = 0; j < byModule[moduleName].length; j++) {
+              var perm = byModule[moduleName][j];
+              var checked = assignedIds.indexOf(perm.permission_id) > -1 ? 'checked' : '';
+              html += '<label class="flex-row" style="margin-bottom:6px;"><input type="checkbox" class="role-perm-checkbox" value="' + perm.permission_id + '" style="width:auto;" ' + checked + '> ' + escapeHtml(perm.permission_key) + ' - ' + escapeHtml(perm.description || '') + '</label><br>';
+            }
+          }
+          qs('role-permissions-list').innerHTML = html;
+          openModal('role-permissions-modal');
+        }).catch(showError);
+      };
+      qs('role-permissions-submit').addEventListener('click', function () {
+        var btn = this;
+        var checkboxes = document.querySelectorAll('.role-perm-checkbox:checked');
+        var ids = [];
+        for (var i = 0; i < checkboxes.length; i++) { ids.push(Number(checkboxes[i].value)); }
+        setButtonLoading(btn, true, 'Saving...');
+        callServer('UserService.setRolePermissions', getSessionId(), Number(qs('role-permissions-roleId').value), ids)
+          .then(function (res) { showToast(res.message, 'success'); closeModal('role-permissions-modal'); })
+          .catch(showError)
+          .then(function () { setButtonLoading(btn, false); });
+      });
+
+      loadReferenceData().then(function () { return loadUsers(); }).catch(showError);
+    })();
+  </script>
+</body>
+</html>

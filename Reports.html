@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <?!= include('CSS'); ?>
+</head>
+<body>
+  <?!= include('JS'); ?>
+  <?!= include('Components'); ?>
+  <script>
+    (function () {
+      var content = buildAppShell('reports', 'Reports');
+      if (!content) { return; }
+
+      var TABS = [
+        { key: 'production', label: 'Production' },
+        { key: 'fmsstage', label: 'FMS Stage' },
+        { key: 'inventory', label: 'Inventory' },
+        { key: 'artwork', label: 'Artwork' },
+        { key: 'quality', label: 'Quality' },
+        { key: 'delivery', label: 'Delivery' }
+      ];
+      var activeTab = 'production';
+
+      var tabButtonsHtml = '';
+      for (var i = 0; i < TABS.length; i++) {
+        tabButtonsHtml += '<button class="btn btn--secondary" id="rpt-tab-' + TABS[i].key + '" type="button">' + TABS[i].label + '</button> ';
+      }
+
+      content.innerHTML =
+        '<div class="toolbar">' + tabButtonsHtml + '</div>' +
+        '<div class="card"><h3 class="card__title" id="rpt-title">Production Achievement</h3><div id="rpt-table"></div><div id="rpt-pagination"></div></div>';
+
+      function setActiveTab(key) {
+        activeTab = key;
+        for (var i = 0; i < TABS.length; i++) {
+          qs('rpt-tab-' + TABS[i].key).className = 'btn' + (TABS[i].key === key ? '' : ' btn--secondary');
+        }
+        loadReport().catch(showError);
+      }
+      for (var i = 0; i < TABS.length; i++) {
+        (function (key) { qs('rpt-tab-' + key).addEventListener('click', function () { setActiveTab(key); }); })(TABS[i].key);
+      }
+
+      var pageState = { page: 1, pageSize: 15 };
+
+      function loadReport() {
+        pageState.page = 1;
+        if (activeTab === 'production') {
+          qs('rpt-title').textContent = 'Production Achievement';
+          return loadPaged('DashboardService.getProductionSummary',
+            [{ key: 'job_card_no', label: 'Job Card' }, { key: 'buyer_name', label: 'Buyer' }, { key: 'style_no', label: 'Style' },
+             { key: 'target_qty', label: 'Target', formatter: formatNumber }, { key: 'actual_qty', label: 'Actual', formatter: formatNumber },
+             { key: 'achievement_pct', label: 'Achievement %', formatter: function (v) { return v === null ? '-' : v + '%'; } },
+             { key: 'rejected_qty', label: 'Rejected', formatter: formatNumber }, { key: 'rework_qty', label: 'Rework', formatter: formatNumber }]);
+        }
+        if (activeTab === 'fmsstage') {
+          qs('rpt-title').textContent = 'FMS Stage Summary';
+          return callServer('DashboardService.getFmsStageSummary', getSessionId()).then(function (res) {
+            renderTable(qs('rpt-table'),
+              [{ key: 'stage_name', label: 'Stage' }, { key: 'status', label: 'Status', formatter: statusBadgeHtml },
+               { key: 'stage_txn_count', label: 'Count', formatter: formatNumber }, { key: 'total_quantity', label: 'Total Qty', formatter: formatNumber },
+               { key: 'total_completed_qty', label: 'Completed Qty', formatter: formatNumber },
+               { key: 'avg_tat_hours', label: 'Avg TAT (hrs)', formatter: function (v) { return v === null ? '-' : Number(v).toFixed(1); } },
+               { key: 'avg_tat_variance_hours', label: 'Avg TAT Variance (hrs)', formatter: function (v) { return v === null ? '-' : Number(v).toFixed(1); } }],
+              res.data);
+            qs('rpt-pagination').innerHTML = '';
+          });
+        }
+        if (activeTab === 'inventory') {
+          qs('rpt-title').textContent = 'Inventory Summary (Fabric + General)';
+          return callServer('DashboardService.getInventorySummary', getSessionId(), false).then(function (res) {
+            renderTable(qs('rpt-table'),
+              [{ key: 'source_type', label: 'Type' }, { key: 'item_code', label: 'Code' }, { key: 'item_name', label: 'Name' },
+               { key: 'closing_stock', label: 'Closing Stock', formatter: formatNumber }, { key: 'reorder_level', label: 'Reorder Level', formatter: formatNumber },
+               { key: 'below_reorder_level', label: 'Low Stock', formatter: function (v) { return Number(v) === 1 ? statusBadgeHtml('Delayed') : '-'; } }],
+              res.data);
+            qs('rpt-pagination').innerHTML = '';
+          });
+        }
+        if (activeTab === 'artwork') {
+          qs('rpt-title').textContent = 'Artwork Summary by Vendor';
+          return callServer('DashboardService.getArtworkSummary', getSessionId()).then(function (res) {
+            renderTable(qs('rpt-table'),
+              [{ key: 'vendor_name', label: 'Vendor' }, { key: 'artwork_type', label: 'Type' },
+               { key: 'artwork_count', label: 'Count', formatter: formatNumber }, { key: 'total_issued', label: 'Issued', formatter: formatNumber },
+               { key: 'total_accepted', label: 'Accepted', formatter: formatNumber }, { key: 'total_rejected', label: 'Rejected', formatter: formatNumber },
+               { key: 'yield_pct', label: 'Yield %', formatter: function (v) { return v === null ? '-' : v + '%'; } },
+               { key: 'reject_pct', label: 'Reject %', formatter: function (v) { return v === null ? '-' : v + '%'; } }],
+              res.data);
+            qs('rpt-pagination').innerHTML = '';
+          });
+        }
+        if (activeTab === 'quality') {
+          qs('rpt-title').textContent = 'Quality Summary by Job Card';
+          return callServer('DashboardService.getQualitySummary', getSessionId(), {}).then(function (res) {
+            renderTable(qs('rpt-table'),
+              [{ key: 'job_card_no', label: 'Job Card' }, { key: 'total_checked', label: 'Checked', formatter: formatNumber },
+               { key: 'total_passed', label: 'Passed', formatter: formatNumber }, { key: 'total_rejected', label: 'Rejected', formatter: formatNumber },
+               { key: 'total_rework', label: 'Rework', formatter: formatNumber },
+               { key: 'reject_pct', label: 'Reject %', formatter: function (v) { return v === null ? '-' : v + '%'; } },
+               { key: 'first_time_through_pct', label: 'FTT %', formatter: function (v) { return v === null ? '-' : v + '%'; } }],
+              res.data);
+            qs('rpt-pagination').innerHTML = '';
+          });
+        }
+        if (activeTab === 'delivery') {
+          qs('rpt-title').textContent = 'Delivery Summary';
+          return loadPaged('DashboardService.getDeliverySummary',
+            [{ key: 'job_card_no', label: 'Job Card' }, { key: 'buyer_name', label: 'Buyer' },
+             { key: 'order_qty', label: 'Order', formatter: formatNumber }, { key: 'dispatched_qty', label: 'Dispatched', formatter: formatNumber },
+             { key: 'pending_qty', label: 'Pending', formatter: formatNumber },
+             { key: 'target_delivery_date', label: 'Target', formatter: formatDate }, { key: 'delivery_date', label: 'Delivered', formatter: formatDate },
+             { key: 'delay_days', label: 'Delay (days)', formatter: formatNumber },
+             { key: 'on_time_flag', label: 'On Time', formatter: function (v) { return v === null ? '-' : (Number(v) === 1 ? statusBadgeHtml('Done') : statusBadgeHtml('Delayed')); } }]);
+        }
+      }
+
+      function loadPaged(fnName, columns) {
+        return callServer(fnName, getSessionId(), {}, pageState.page, pageState.pageSize).then(function (res) {
+          renderTable(qs('rpt-table'), columns, res.data.rows);
+          renderPagination(qs('rpt-pagination'), res.data, function (p) { pageState.page = p; loadPagedRefresh(fnName, columns); });
+        });
+      }
+      function loadPagedRefresh(fnName, columns) {
+        return callServer(fnName, getSessionId(), {}, pageState.page, pageState.pageSize).then(function (res) {
+          renderTable(qs('rpt-table'), columns, res.data.rows);
+          renderPagination(qs('rpt-pagination'), res.data, function (p) { pageState.page = p; loadPagedRefresh(fnName, columns); });
+        }).catch(showError);
+      }
+
+      setActiveTab('production');
+    })();
+  </script>
+</body>
+</html>

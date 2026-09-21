@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <base target="_top">
+  <?!= include('CSS'); ?>
+</head>
+<body>
+  <?!= include('JS'); ?>
+  <?!= include('Components'); ?>
+  <script>
+    (function () {
+      var content = buildAppShell('purchase', 'Purchase Orders');
+      if (!content) { return; }
+
+      var STATUS_TRANSITIONS = { 'Open': ['In Production', 'Cancelled'], 'In Production': ['Completed', 'Cancelled'], 'Completed': ['Closed'], 'Closed': [], 'Cancelled': [] };
+      var state = { status: '', search: '', page: 1, pageSize: 15 };
+      var buyers = [], styles = [];
+
+      content.innerHTML =
+        '<div class="card">' +
+          '<div class="card__header">' +
+            '<h3 class="card__title">Purchase Orders</h3>' +
+            '<button class="btn" id="po-new-btn" type="button">+ New Purchase Order</button>' +
+          '</div>' +
+          '<div class="toolbar">' +
+            '<input type="text" id="po-search" placeholder="Search PO number...">' +
+            '<select id="po-status">' +
+              '<option value="">All statuses</option>' +
+              '<option value="Open">Open</option><option value="In Production">In Production</option>' +
+              '<option value="Completed">Completed</option><option value="Closed">Closed</option><option value="Cancelled">Cancelled</option>' +
+            '</select>' +
+          '</div>' +
+          '<div id="po-table"></div>' +
+          '<div id="po-pagination"></div>' +
+        '</div>' +
+
+        '<div class="modal-overlay" id="po-create-modal">' +
+          '<div class="modal">' +
+            '<div class="modal__header"><h3>New Purchase Order</h3><button class="modal__close" type="button" onclick="closeModal(\'po-create-modal\')">&times;</button></div>' +
+            '<div class="modal__body">' +
+              '<div class="form-grid">' +
+                '<div class="form-field"><label>Buyer *</label><select id="po-buyer"></select></div>' +
+                '<div class="form-field"><label>Style *</label><select id="po-style"></select></div>' +
+                '<div class="form-field"><label>Order Qty *</label><input type="number" id="po-orderQty" min="1"></div>' +
+                '<div class="form-field"><label>PO Date</label><input type="date" id="po-date"></div>' +
+                '<div class="form-field"><label>Target Delivery Date</label><input type="date" id="po-target"></div>' +
+                '<div class="form-field"><label>Remarks</label><input type="text" id="po-remarks"></div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="modal__footer"><button class="btn btn--secondary" type="button" onclick="closeModal(\'po-create-modal\')">Cancel</button><button class="btn" id="po-create-submit" type="button">Create</button></div>' +
+          '</div>' +
+        '</div>' +
+
+        '<div class="modal-overlay" id="po-edit-modal">' +
+          '<div class="modal">' +
+            '<div class="modal__header"><h3>Edit Purchase Order</h3><button class="modal__close" type="button" onclick="closeModal(\'po-edit-modal\')">&times;</button></div>' +
+            '<div class="modal__body">' +
+              '<input type="hidden" id="po-edit-id">' +
+              '<div class="form-grid">' +
+                '<div class="form-field"><label>Target Delivery Date</label><input type="date" id="po-edit-target"></div>' +
+                '<div class="form-field"><label>Remarks</label><input type="text" id="po-edit-remarks"></div>' +
+                '<div class="form-field"><label>Status</label><select id="po-edit-status"></select></div>' +
+              '</div>' +
+            '</div>' +
+            '<div class="modal__footer"><button class="btn btn--secondary" type="button" onclick="closeModal(\'po-edit-modal\')">Cancel</button><button class="btn" id="po-edit-submit" type="button">Save Changes</button></div>' +
+          '</div>' +
+        '</div>';
+
+      function loadList() {
+        var filters = {};
+        if (state.status) { filters.status = state.status; }
+        if (state.search) { filters.search = state.search; }
+        return callServer('PurchaseService.listPurchaseOrders', getSessionId(), filters, state.page, state.pageSize).then(function (res) {
+          renderTable(qs('po-table'),
+            [
+              { key: 'po_number', label: 'PO Number' }, { key: 'buyer_name', label: 'Buyer' }, { key: 'style_no', label: 'Style' },
+              { key: 'order_qty', label: 'Order Qty', formatter: formatNumber }, { key: 'po_date', label: 'PO Date', formatter: formatDate },
+              { key: 'target_delivery_date', label: 'Target', formatter: formatDate }, { key: 'status', label: 'Status', formatter: statusBadgeHtml }
+            ],
+            res.data.rows,
+            { actionsHtml: function (row) { return '<button class="btn btn--secondary btn--sm" type="button" onclick="poOpenEdit(' + row.po_id + ')">Edit</button>'; } }
+          );
+          renderPagination(qs('po-pagination'), res.data, function (p) { state.page = p; loadList().catch(showError); });
+        });
+      }
+
+      function loadReferenceData() {
+        return callServer('MasterDataService.listBuyers', getSessionId()).then(function (res) { buyers = res.data; });
+      }
+
+      qs('po-search').addEventListener('input', debounce(function () { state.search = this.value; state.page = 1; loadList().catch(showError); }, 350));
+      qs('po-status').addEventListener('change', function () { state.status = this.value; state.page = 1; loadList().catch(showError); });
+
+      function loadStylesForBuyer(buyerId, targetSelectId) {
+        return callServer('MasterDataService.listStyles', getSessionId(), buyerId ? Number(buyerId) : undefined).then(function (res) {
+          styles = res.data;
+          qs(targetSelectId).innerHTML = buildOptionsHtml(styles, 'style_id', 'style_no', 'Select a style');
+        });
+      }
+
+      qs('po-new-btn').addEventListener('click', function () {
+        qs('po-buyer').innerHTML = buildOptionsHtml(buyers, 'buyer_id', 'buyer_name', 'Select a buyer');
+        qs('po-style').innerHTML = '<option value="">Select a buyer first</option>';
+        qs('po-orderQty').value = ''; qs('po-date').value = ''; qs('po-target').value = ''; qs('po-remarks').value = '';
+        openModal('po-create-modal');
+      });
+      qs('po-buyer').addEventListener('change', function () { loadStylesForBuyer(this.value, 'po-style').catch(showError); });
+
+      qs('po-create-submit').addEventListener('click', function () {
+        var btn = this;
+        var input = {
+          buyerId: Number(qs('po-buyer').value), styleId: Number(qs('po-style').value), orderQty: Number(qs('po-orderQty').value),
+          poDate: qs('po-date').value || undefined, targetDeliveryDate: qs('po-target').value || undefined, remarks: qs('po-remarks').value || undefined
+        };
+        setButtonLoading(btn, true, 'Creating...');
+        callServer('PurchaseService.createPurchaseOrder', getSessionId(), input)
+          .then(function (res) { showToast(res.message, 'success'); closeModal('po-create-modal'); return loadList(); })
+          .catch(showError)
+          .then(function () { setButtonLoading(btn, false); });
+      });
+
+      window.poOpenEdit = function (poId) {
+        callServer('PurchaseService.getPurchaseOrder', getSessionId(), poId).then(function (res) {
+          var po = res.data;
+          qs('po-edit-id').value = po.po_id;
+          qs('po-edit-target').value = po.target_delivery_date ? formatDate(po.target_delivery_date).split('-').reverse().join('-') : '';
+          qs('po-edit-remarks').value = po.remarks || '';
+          var allowed = STATUS_TRANSITIONS[po.status] || [];
+          var opts = '<option value="' + po.status + '">' + po.status + ' (current)</option>';
+          for (var i = 0; i < allowed.length; i++) { opts += '<option value="' + allowed[i] + '">' + allowed[i] + '</option>'; }
+          qs('po-edit-status').innerHTML = opts;
+          openModal('po-edit-modal');
+        }).catch(showError);
+      };
+
+      qs('po-edit-submit').addEventListener('click', function () {
+        var btn = this;
+        var poId = Number(qs('po-edit-id').value);
+        var newStatus = qs('po-edit-status').value;
+        var patch = { targetDeliveryDate: qs('po-edit-target').value || null, remarks: qs('po-edit-remarks').value || null };
+        setButtonLoading(btn, true, 'Saving...');
+        callServer('PurchaseService.updatePurchaseOrder', getSessionId(), poId, patch)
+          .then(function () {
+            var statusChanged = qs('po-edit-status').options[qs('po-edit-status').selectedIndex].text.indexOf('(current)') === -1;
+            return statusChanged ? callServer('PurchaseService.updatePurchaseOrderStatus', getSessionId(), poId, newStatus) : null;
+          })
+          .then(function () { showToast('Purchase order updated.', 'success'); closeModal('po-edit-modal'); return loadList(); })
+          .catch(showError)
+          .then(function () { setButtonLoading(btn, false); });
+      });
+
+      loadReferenceData().then(function () { return loadList(); }).catch(showError);
+    })();
+  </script>
+</body>
+</html>

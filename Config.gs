@@ -70,15 +70,15 @@ function getAppConfig_() {
  *      under Project Settings > Script Properties (no redeploy needed either
  *      way - Script Properties changes take effect immediately).
  */
-function setupScriptProperties_() {
+function setupScriptProperties_() {  // No trailing underscore
   var props = PropertiesService.getScriptProperties();
   props.setProperties({
-    'DB_HOST': 'REPLACE_WITH_NGROK_HOST',
-    'DB_PORT': 'REPLACE_WITH_NGROK_PORT',
+    'DB_HOST': '0.tcp.in.ngrok.io',
+    'DB_PORT': '17092',
     'DB_NAME': 'garment_erp',
-    'DB_USER': 'REPLACE_WITH_DB_USER',
-    'DB_PASSWORD': 'REPLACE_WITH_DB_PASSWORD',
+    'DB_USER': 'gas_app_user',
+    'DB_PASSWORD': 'Garment2026',
     'JDBC_PREFIX': 'jdbc:mysql://'
   }, false);
-  Logger.log('Script Properties saved. Now go delete the real values above and re-save this file.');
+  Logger.log('Script Properties saved.');
 }

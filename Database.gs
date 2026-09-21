@@ -11,23 +11,14 @@ var DatabaseService = (function () {
 
   function getConnection() {
     var cfg = getDbConfig_();
-    var url = cfg.jdbcPrefix + cfg.host + ':' + cfg.port + '/' + cfg.name +
-      '?useSSL=false';
+    // AFTER
+  var url = cfg.jdbcPrefix + cfg.host + ':' + cfg.port + '/' + cfg.name +
+    '?useSSL=false';
     // useSSL=false: the local MySQL instance behind the ngrok tunnel typically has no
     // valid TLS certificate to present. Acceptable only under the mitigations in
     // ARCHITECTURE.md section 3.4 (dedicated low-privilege DB user, strong password,
     // ngrok as the sole entry point). Revisit if MySQL is ever moved to a host that
     // terminates TLS properly (e.g. Cloud SQL).
-    //
-    // Deliberately NOT included: rewriteBatchedStatements, serverTimezone (and any
-    // other MySQL Connector/J-specific property). Apps Script's built-in Jdbc
-    // service only accepts a narrow, whitelisted set of connection properties and
-    // throws "The following connection properties are unsupported: ..." for
-    // anything outside it - confirmed against a live ngrok-tunneled MySQL instance.
-    // rewriteBatchedStatements would have been a no-op anyway (nothing here does
-    // JDBC batching); time zone handling is independent of this connection string
-    // and already goes through APP_TIME_ZONE (Utils.gs) / schema.sql's session-level
-    // SET time_zone.
     return Jdbc.getConnection(url, cfg.user, cfg.password);
   }
 
@@ -249,4 +240,7 @@ function testDatabaseConnection_() {
     Logger.log('DB connection FAILED: ' + e);
     throw e;
   }
+}
+function runTestConnection() {
+  testDatabaseConnection_();
 }

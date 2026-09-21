@@ -81,6 +81,9 @@ var AuthService = (function () {
       return errorResponse_('Username and password are required.');
     }
 
+    // Authentication itself must complete before any non-essential audit work.
+    // This keeps a broken/missing audit_logs permission from making valid users
+    // unable to sign in.
     var rows = DatabaseService.executeQuery(
       'SELECT user_id, username, password_hash, full_name, email, role_id, is_active FROM users WHERE username = ? LIMIT 1',
       [username]
@@ -88,11 +91,12 @@ var AuthService = (function () {
     if (rows.length === 0) {
       return errorResponse_('Invalid username or password.');
     }
+
     var user = rows[0];
     if (Number(user.is_active) !== 1) {
       return errorResponse_('This account is inactive. Contact your administrator.');
     }
-    if (!verifyPassword_(plainPassword, user.password_hash)) {
+    if (!verifyPassword_(plainPassword, String(user.password_hash || ''))) {
       return errorResponse_('Invalid username or password.');
     }
 
@@ -100,6 +104,8 @@ var AuthService = (function () {
     var appCfg = getAppConfig_();
     var expiresAt = new Date(Date.now() + appCfg.sessionDurationHours * 60 * 60 * 1000);
 
+    // The session + last-login update are the authentication-critical writes.
+    // Keep them atomic. Audit logging is intentionally best-effort below.
     DatabaseService.executeTransaction(function (conn) {
       DatabaseService.executeInsert(
         'INSERT INTO user_sessions (session_id, user_id, expires_at, is_valid) VALUES (?, ?, ?, 1)',
@@ -111,13 +117,19 @@ var AuthService = (function () {
         [user.user_id],
         conn
       );
-      DatabaseService.executeInsert(
-        "INSERT INTO audit_logs (user_id, action, module, record_id) VALUES (?, 'Login', 'Auth', ?)",
-        [user.user_id, String(user.user_id)],
-        conn
-      );
       return null;
     });
+
+    // Audit logging must never turn a successful authentication into a failed
+    // login. The technical failure is still recorded server-side for diagnosis.
+    try {
+      DatabaseService.executeInsert(
+        "INSERT INTO audit_logs (user_id, action, module, record_id) VALUES (?, 'Login', 'Auth', ?)",
+        [user.user_id, String(user.user_id)]
+      );
+    } catch (auditError) {
+      Logger.log('Login audit insert failed after successful authentication: ' + auditError);
+    }
 
     return successResponse_({
       sessionId: sessionId,
@@ -229,6 +241,9 @@ var AuthService = (function () {
  * Do not leave a real password typed into this file after running it -
  * type it into the Execution log / editor, run once, then clear it.
  */
+
+
+
 function setUserPassword_(username, newPlainPassword) {
   if (!isNonEmptyString_(username) || !isNonEmptyString_(newPlainPassword)) {
     throw new Error('setUserPassword_ requires a username and a new password.');
@@ -241,7 +256,9 @@ function setUserPassword_(username, newPlainPassword) {
   Logger.log(count + ' row(s) updated for username=' + username);
   return count;
 }
-
+// function runPasswordSetup() {
+//   setUserPassword_('admin', 'Admin@123');
+// }
 /**
  * Manual round-trip check. Run from the editor after setupScriptProperties_
  * and testDatabaseConnection_ both succeed, and BEFORE relying on login().

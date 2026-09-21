@@ -33,16 +33,20 @@ var PAGES_ = {
   reports: 'Reports'
 };
 
-function doGet(e) {
-  var requestedPage = (e && e.parameter && e.parameter.page) ? String(e.parameter.page).toLowerCase() : 'login';
-  var fileName = PAGES_.hasOwnProperty(requestedPage) ? PAGES_[requestedPage] : PAGES_.login;
 
-  var template = HtmlService.createTemplateFromFile(fileName);
-  return template.evaluate()
-    .setTitle('Garment Manufacturing ERP')
-    .addMetaTag('viewport', 'width=device-width, initial-scale=1')
-    .setFaviconUrl('https://www.google.com/images/icons/product/sheets-32.png')
-    .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+function doGet(e) {
+  var page = (e && e.parameter && e.parameter.page) ? e.parameter.page.toLowerCase() : 'login';
+  var fileName = PAGES_[page] || PAGES_['login'];
+  
+  try {
+    var template = HtmlService.createTemplateFromFile(fileName);
+    return template.evaluate()
+      .setTitle('Garment ERP')
+      .addMetaTag('viewport', 'width=device-width, initial-scale=1')
+      .setXFrameOptionsMode(HtmlService.XFrameOptionsMode.ALLOWALL);
+  } catch (err) {
+    return HtmlService.createHtmlOutput('<h3>Page Load Error:</h3><pre>' + err.message + '\n' + err.stack + '</pre>');
+  }
 }
 
 /**
@@ -55,33 +59,4 @@ function doGet(e) {
  */
 function include(filename) {
   return HtmlService.createHtmlOutputFromFile(filename).getContent();
-}
-
-function debugLoginCheck_() {
-  try {
-    var cfg = getDbConfig_();
-    Logger.log('Script Properties OK. HOST=' + cfg.host + ' PORT=' + cfg.port + ' NAME=' + cfg.name + ' USER=' + cfg.user);
-  } catch (e) {
-    Logger.log('FAILED reading Script Properties: ' + e.message);
-    return;
-  }
-
-  try {
-    var rows = DatabaseService.executeQuery(
-      'SELECT user_id, username, password_hash, is_active FROM users WHERE username = ?',
-      ['admin']
-    );
-    Logger.log('DB connection OK. Row count for username=admin: ' + rows.length);
-    if (rows.length > 0) {
-      Logger.log('admin row -> is_active=' + rows[0].is_active + ', hash starts with: ' + String(rows[0].password_hash).substring(0, 25));
-    } else {
-      Logger.log('No admin row found - seed.sql (with the fixed hash) has not been run against THIS database yet.');
-    }
-  } catch (e) {
-    Logger.log('FAILED connecting to / querying the database: ' + e.message);
-    return;
-  }
-
-  var knownHash = 'iterhash_sha256$10000$01607bd1-2c08-4d36-b4eb-b8827c119244b7888428-cdb1-47ec-b404-3f8eb07ef6e6$8a108105793a492b952a5a69d7bb857de84b31424ff5db9d93f4c73e19ef2513';
-  Logger.log('Self-check verifyPassword("Admin@123", knownHash) = ' + AuthService.verifyPassword('Admin@123', knownHash));
 }

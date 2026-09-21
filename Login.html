@@ -27,9 +27,21 @@
   <?!= include('JS'); ?>
   <script>
     (function () {
+      // Helper to safely route the top window within Google Apps Script iframe sandbox
+      function redirectToPage(pageName) {
+        if (window.top && window.top.location) {
+          window.top.location.search = '?page=' + pageName;
+        } else {
+          window.location.href = '?page=' + pageName;
+        }
+      }
+
       // If already signed in, skip straight to the dashboard.
       var existing = getSession();
-      if (existing && existing.sessionId) { window.location.href = '?page=dashboard'; return; }
+      if (existing && existing.sessionId) { 
+        redirectToPage('dashboard'); 
+        return; 
+      }
 
       qs('login-form').addEventListener('submit', function (evt) {
         evt.preventDefault();
@@ -47,13 +59,18 @@
         setButtonLoading(btn, true, 'Signing in...');
         callServer('AuthService.login', username, password)
           .then(function (response) {
+            if (!response || !response.data || !response.data.sessionId || !response.data.user) {
+              throw new Error('Login failed: the server returned an invalid authentication response.');
+            }
             setSession(response.data.sessionId, response.data.user);
-            window.location.href = '?page=dashboard';
+            redirectToPage('dashboard');
           })
           .catch(function (err) {
-            errorEl.textContent = err.message || 'Login failed.';
+            errorEl.textContent = (err && err.message) ? err.message : 'Login failed.';
           })
-          .then(function () { setButtonLoading(btn, false); });
+          .then(function () { 
+            setButtonLoading(btn, false); 
+          });
       });
     })();
   </script>

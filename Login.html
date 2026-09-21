@@ -8,36 +8,83 @@
   <div class="login-shell">
     <div class="login-card">
       <h1>Garment Manufacturing ERP</h1>
-      <p class="subtitle">Sign in to continue</p>
-      <form id="login-form">
-        <div class="form-field" style="margin-bottom:14px;"><label for="login-username">Username</label><input type="text" id="login-username" autocomplete="username" required></div>
-        <div class="form-field" style="margin-bottom:6px;"><label for="login-password">Password</label><input type="password" id="login-password" autocomplete="current-password" required></div>
-        <div class="field-error" id="login-error"></div>
+      <p class="subtitle" id="login-subtitle">Sign in to continue</p>
+
+      <form id="login-form" novalidate>
+        <div class="form-field" style="margin-bottom:14px;">
+          <label for="login-username">Username</label>
+          <input type="text" id="login-username" autocomplete="username" required>
+        </div>
+        <div class="form-field" style="margin-bottom:6px;">
+          <label for="login-password">Password</label>
+          <input type="password" id="login-password" autocomplete="current-password" required>
+        </div>
+        <div class="field-error" id="login-error" role="alert" aria-live="polite"></div>
         <button type="submit" class="btn" id="login-submit-btn" style="width:100%; margin-top:10px;">Sign In</button>
       </form>
+
+      <div id="login-success" style="display:none;">
+        <div style="color:#15803d; margin-bottom:14px;">Login successful.</div>
+        <button type="button" class="btn" id="open-dashboard-btn" style="width:100%;">Open Dashboard</button>
+      </div>
     </div>
   </div>
+
   <?!= include('JS'); ?>
   <script>
     (function () {
-      if (getSessionId()) { navigateToPage('dashboard'); return; }
-      qs('login-form').addEventListener('submit', function (evt) {
-        evt.preventDefault();
-        var username = qs('login-username').value.trim();
-        var password = qs('login-password').value;
-        var errorEl = qs('login-error');
-        var btn = qs('login-submit-btn');
+      /* Never redirect on page load using an unverified/stale browser token. */
+      clearSession();
+
+      var form = qs('login-form');
+      var usernameEl = qs('login-username');
+      var passwordEl = qs('login-password');
+      var errorEl = qs('login-error');
+      var submitBtn = qs('login-submit-btn');
+      var successBox = qs('login-success');
+      var dashboardBtn = qs('open-dashboard-btn');
+
+      form.addEventListener('submit', function (event) {
+        event.preventDefault();
         errorEl.textContent = '';
-        if (!username || !password) { errorEl.textContent = 'Enter both username and password.'; return; }
-        setButtonLoading(btn, true, 'Signing in...');
-        callServer('AuthService.login', username, password).then(function (response) {
-          if (!response.data || !response.data.sessionId || !response.data.user) { throw new Error('Login failed: invalid authentication response.'); }
-          setSession(response.data.sessionId, response.data.user);
-          navigateToPage('dashboard');
-        }).catch(function (err) {
-          errorEl.textContent = (err && err.message) ? err.message : 'Login failed.';
-          setButtonLoading(btn, false);
-        });
+
+        var username = usernameEl.value.trim();
+        var password = passwordEl.value;
+        if (!username || !password) {
+          errorEl.textContent = 'Enter both username and password.';
+          return;
+        }
+
+        setButtonLoading(submitBtn, true, 'Signing in...');
+        callServer('AuthService.login', username, password)
+          .then(function (response) {
+            if (!response || response.success !== true || !response.data ||
+                !response.data.sessionId || !response.data.user) {
+              throw new Error('Login failed: invalid authentication response.');
+            }
+
+            setSession(response.data.sessionId, response.data.user);
+            form.style.display = 'none';
+            qs('login-subtitle').textContent = 'Authentication complete';
+            successBox.style.display = '';
+          })
+          .catch(function (error) {
+            errorEl.textContent = error && error.message ? error.message : 'Login failed.';
+            setButtonLoading(submitBtn, false);
+          });
+      });
+
+      /* This is a real user click, so sandbox top-navigation is permitted. */
+      dashboardBtn.addEventListener('click', function () {
+        var page = encodeURIComponent('dashboard');
+        var currentUrl = window.top.location.href;
+        var queryIndex = currentUrl.indexOf('?');
+        var hashIndex = currentUrl.indexOf('#');
+        var end = currentUrl.length;
+        if (queryIndex >= 0 && queryIndex < end) { end = queryIndex; }
+        if (hashIndex >= 0 && hashIndex < end) { end = hashIndex; }
+        var destination = currentUrl.substring(0, end) + '?page=' + page;
+        window.top.location.href = destination;
       });
     })();
   </script>

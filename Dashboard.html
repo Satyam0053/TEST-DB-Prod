@@ -51,9 +51,9 @@
         return callServer('DashboardService.getOverviewKpis', getSessionId()).then(function (res) {
           var k = res.data;
           qs('kpi-grid').innerHTML =
-            '<div class="kpi-card"><div class="kpi-card__label">Job Cards</div><div class="kpi-card__value" style="font-size:14px; margin-top:10px;">' + statusChipsHtml(k.jobCardsByStatus, 'status', 'cnt') + '</div></div>' +
-            '<div class="kpi-card"><div class="kpi-card__label">Purchase Orders</div><div class="kpi-card__value" style="font-size:14px; margin-top:10px;">' + statusChipsHtml(k.purchaseOrdersByStatus, 'status', 'cnt') + '</div></div>' +
-            '<div class="kpi-card"><div class="kpi-card__label">On-Time Delivery</div><div class="kpi-card__value">' + (k.otd.otdPct === null ? '-' : k.otd.otdPct + '%') + '</div><div class="kpi-card__sub">' + k.otd.onTimeCount + ' of ' + k.otd.totalDispatched + ' dispatched on time</div></div>' +
+            '<div class="kpi-card"><div class="kpi-card__label">Job Cards</div><div class="kpi-card__value" style="font-size:14px; margin-top:10px;">' + statusChipsHtml(k.jobCardsByStatus, 'status', 'count') + '</div></div>' +
+            '<div class="kpi-card"><div class="kpi-card__label">Purchase Orders</div><div class="kpi-card__value" style="font-size:14px; margin-top:10px;">' + statusChipsHtml(k.purchaseOrdersByStatus, 'status', 'count') + '</div></div>' +
+            '<div class="kpi-card"><div class="kpi-card__label">On-Time Delivery</div><div class="kpi-card__value">' + (k.otd && k.otd.otdPct === null ? '-' : (k.otd && k.otd.otdPct !== null ? k.otd.otdPct + '%' : '-')) + '</div></div>' +
             '<div class="kpi-card"><div class="kpi-card__label">Overall QC Reject %</div><div class="kpi-card__value">' + (k.overallQualityRejectPct === null ? '-' : k.overallQualityRejectPct + '%') + '</div></div>' +
             '<div class="kpi-card"><div class="kpi-card__label">Low Stock Items</div><div class="kpi-card__value">' + k.lowStockItemCount + '</div></div>' +
             '<div class="kpi-card"><div class="kpi-card__label">TAT Breaches</div><div class="kpi-card__value">' + k.tatBreachCount + '</div></div>';
@@ -101,15 +101,17 @@
         jcState.status = this.value; jcState.page = 1; loadJcSummary().catch(showError);
       });
 
-    Promise.all([loadKpis(), loadTatBreaches(), loadJcSummary()])
-      .catch(function (err) {
-        console.error(err);
-        document.body.innerHTML =
-          '<div style="padding:20px;color:#d00;font-family:Arial;background:#fff;">' +
-          'Dashboard failed to load. Please allow cookies and refresh.<br>' +
-          (err && err.message ? err.message : 'Unknown error') +
-          '</div>';
-      });
+      Promise.all([loadKpis(), loadTatBreaches(), loadJcSummary()])
+        .catch(function (err) {
+          var message = (err && err.message) ? err.message : String(err);
+          console.error('Dashboard failed to load:', err);
+          document.body.innerHTML =
+            '<div style="padding:24px; font-family:Arial, sans-serif; color:#d32f2f; background:#fff;">' +
+              'Dashboard failed to load. Please allow cookies and refresh the page.<br><br>' +
+              escapeHtml(message) +
+            '</div>';
+        });
+    })();
   </script>
 </body>
 </html>

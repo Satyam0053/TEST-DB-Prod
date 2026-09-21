@@ -6,59 +6,67 @@
      newer syntax, for one consistent style across every file in this repo).
      Plain <script> - no scriptlet tags (see Code.gs's include() comment).
      ========================================================================== */
+  
+  var SESSION_STORAGE_KEY = 'gmerp_session';
+  
+  function qs(id) { return document.getElementById(id); }
+  
+  // ---- Session (spec: no server-side session cookie - the sessionId from
+  // AuthService.login() lives in localStorage and is sent back on every
+  // google.script.run call; every *Service.gs function re-validates it
+  // server-side regardless, so this is a convenience, not the security
+  // boundary) ---------------------------------------------------------------
+  
+  function getSession() {
+    try {
+      var raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
+      if (raw) { return JSON.parse(raw); }
+    } catch (e) {}
+    
+    try {
+      var rawLocal = localStorage.getItem(SESSION_STORAGE_KEY);
+      if (rawLocal) { return JSON.parse(rawLocal); }
+    } catch (e) {}
 
-var SESSION_STORAGE_KEY = 'gmerp_session';
-
-function getSession() {
-  try {
-    var raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
-    if (raw) return JSON.parse(raw);
-  } catch (e) {}
-
-  try {
-    var rawLocal = localStorage.getItem(SESSION_STORAGE_KEY);
-    if (rawLocal) return JSON.parse(rawLocal);
-  } catch (e) {}
-
-  return null;
-}
-
-function setSession(sessionId, user) {
-  try {
-    sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
-      sessionId: sessionId,
-      user: user
-    }));
-  } catch (e) {}
-
-  try {
-    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
-      sessionId: sessionId,
-      user: user
-    }));
-  } catch (e) {
-    // ignore if blocked
+    return null;
   }
-}
+  
+  function setSession(sessionId, user) {
+    try {
+      sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
+        sessionId: sessionId,
+        user: user
+      }));
+    } catch (e) {}
 
-function clearSession() {
-  try { sessionStorage.removeItem(SESSION_STORAGE_KEY); } catch (e) {}
-  try { localStorage.removeItem(SESSION_STORAGE_KEY); } catch (e) {}
-}
-
+    try {
+      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
+        sessionId: sessionId,
+        user: user
+      }));
+    } catch (e) {
+      // localStorage unavailable - session just won't persist across reloads
+    }
+  }
+  
+  function clearSession() {
+    try { sessionStorage.removeItem(SESSION_STORAGE_KEY); } catch (e) {}
+    try { localStorage.removeItem(SESSION_STORAGE_KEY); } catch (e) {}
+  }
+  
   function getSessionId() {
     var s = getSession();
     return s ? s.sessionId : null;
   }
-
+  
   function getCurrentUser() {
     var s = getSession();
     return s ? s.user : null;
   }
-
+  
   /** Called at the top of every module page except Login.html. Redirects to
-   *  the login page if there's no local session; returns the user object
-   *  otherwise. The server is still the real gatekeeper - see file header. */
+    *  the login page if there's no local session; returns the user object
+    *  otherwise. The server is still the real gatekeeper - see file header. */
   function requireAuth() {
     var session = getSession();
     if (!session || !session.sessionId) {
@@ -67,7 +75,7 @@ function clearSession() {
     }
     return session.user;
   }
-
+  
   function logout() {
     var sessionId = getSessionId();
     clearSession();
@@ -76,7 +84,7 @@ function clearSession() {
     }
     window.location.href = '?page=login';
   }
-
+  
   // ---- google.script.run wrapper -------------------------------------------
   // fnPath is written everywhere in this project as 'ServiceName.methodName'
   // (e.g. 'JobCardService.createJobCard') purely for readability at the call
@@ -107,9 +115,9 @@ function clearSession() {
       runner[methodName].apply(runner, args);
     });
   }
-
+  
   // ---- Toast ---------------------------------------------------------------
-
+  
   function ensureToastStack_() {
     var stack = qs('toast-stack');
     if (!stack) {
@@ -119,7 +127,7 @@ function clearSession() {
     }
     return stack;
   }
-
+  
   function showToast(message, type) {
     var stack = ensureToastStack_();
     var el = document.createElement('div');
@@ -130,25 +138,25 @@ function clearSession() {
       if (el.parentNode) { el.parentNode.removeChild(el); }
     }, 3800);
   }
-
+  
   function showError(err) {
     showToast((err && err.message) ? err.message : String(err), 'error');
   }
-
+  
   // ---- Modal ---------------------------------------------------------------
-
+  
   function openModal(modalId) {
     var el = qs(modalId);
     if (el) { el.classList.add('is-open'); }
   }
-
+  
   function closeModal(modalId) {
     var el = qs(modalId);
     if (el) { el.classList.remove('is-open'); }
   }
-
+  
   // ---- Formatting / escaping -------------------------------------------------
-
+  
   function escapeHtml(value) {
     if (value === null || typeof value === 'undefined') { return ''; }
     return String(value)
@@ -158,9 +166,9 @@ function clearSession() {
       .replace(/"/g, '&quot;')
       .replace(/'/g, '&#39;');
   }
-
+  
   function pad2_(n) { return (n < 10 ? '0' : '') + n; }
-
+  
   /**
    * google.script.run auto-converts a server Date return value into a real
    * client-side JS Date object (not a string) - so every date/datetime field
@@ -189,30 +197,30 @@ function clearSession() {
     }
     return { y: Number(dateBits[0]), m: Number(dateBits[1]), d: Number(dateBits[2]), hh: timeBits[0], mm: timeBits[1] };
   }
-
+  
   function formatDate(value) {
     if (!value) { return '-'; }
     var p = toDateParts_(value);
     if (!p) { return String(value); }
     return pad2_(p.d) + '-' + pad2_(p.m) + '-' + p.y;
   }
-
+  
   function formatDateTime(value) {
     if (!value) { return '-'; }
     var p = toDateParts_(value);
     if (!p) { return String(value); }
     return pad2_(p.d) + '-' + pad2_(p.m) + '-' + p.y + ' ' + pad2_(p.hh) + ':' + pad2_(p.mm);
   }
-
+  
   function formatNumber(value) {
     if (value === null || typeof value === 'undefined' || value === '') { return '-'; }
     var num = Number(value);
     if (isNaN(num)) { return String(value); }
     return num.toLocaleString('en-IN');
   }
-
+  
   // ---- Misc ---------------------------------------------------------------
-
+  
   function debounce(fn, waitMs) {
     var timer = null;
     return function () {
@@ -222,7 +230,7 @@ function clearSession() {
       timer = setTimeout(function () { fn.apply(ctx, args); }, waitMs);
     };
   }
-
+  
   function setButtonLoading(btnEl, isLoading, loadingText) {
     if (!btnEl) { return; }
     if (isLoading) {

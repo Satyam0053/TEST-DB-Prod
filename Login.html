@@ -23,17 +23,20 @@
       </form>
     </div>
   </div>
-
+  
   <?!= include('JS'); ?>
   <script>
     (function () {
       // Helper to safely route the top window within Google Apps Script iframe sandbox
       function redirectToPage(pageName) {
+        var url = '?page=' + pageName;
         if (window.top && window.top.location) {
-          window.top.location.search = '?page=' + pageName;
-        } else {
-          window.location.href = '?page=' + pageName;
+          try {
+            window.top.location.href = url;
+            return;
+          } catch (e) {}
         }
+        window.location.href = url;
       }
 
       // If already signed in, skip straight to the dashboard.
@@ -42,7 +45,7 @@
         redirectToPage('dashboard'); 
         return; 
       }
-
+      
       qs('login-form').addEventListener('submit', function (evt) {
         evt.preventDefault();
         var username = qs('login-username').value.trim();
@@ -50,12 +53,12 @@
         var errorEl = qs('login-error');
         var btn = qs('login-submit-btn');
         errorEl.textContent = '';
-
+        
         if (!username || !password) {
           errorEl.textContent = 'Enter both username and password.';
           return;
         }
-
+        
         setButtonLoading(btn, true, 'Signing in...');
         callServer('AuthService.login', username, password)
           .then(function (response) {
@@ -73,17 +76,6 @@
           });
       });
     })();
-
-  function redirectToPage(pageName) {
-  var url = '?page=' + pageName;
-  if (window.top && window.top.location) {
-    try {
-      window.top.location.href = url;
-      return;
-    } catch (e) {}
-  }
-  window.location.href = url;
-}
   </script>
 </body>
 </html>

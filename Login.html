@@ -73,6 +73,17 @@
           });
       });
     })();
+
+  function redirectToPage(pageName) {
+  var url = '?page=' + pageName;
+  if (window.top && window.top.location) {
+    try {
+      window.top.location.href = url;
+      return;
+    } catch (e) {}
+  }
+  window.location.href = url;
+}
   </script>
 </body>
 </html>

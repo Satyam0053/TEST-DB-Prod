@@ -7,34 +7,44 @@
      Plain <script> - no scriptlet tags (see Code.gs's include() comment).
      ========================================================================== */
 
-  var SESSION_STORAGE_KEY = 'gmerp_session';
+var SESSION_STORAGE_KEY = 'gmerp_session';
 
-  function qs(id) { return document.getElementById(id); }
+function getSession() {
+  try {
+    var raw = sessionStorage.getItem(SESSION_STORAGE_KEY);
+    if (raw) return JSON.parse(raw);
+  } catch (e) {}
 
-  // ---- Session (spec: no server-side session cookie - the sessionId from
-  // AuthService.login() lives in localStorage and is sent back on every
-  // google.script.run call; every *Service.gs function re-validates it
-  // server-side regardless, so this is a convenience, not the security
-  // boundary) ---------------------------------------------------------------
+  try {
+    var rawLocal = localStorage.getItem(SESSION_STORAGE_KEY);
+    if (rawLocal) return JSON.parse(rawLocal);
+  } catch (e) {}
 
-  function getSession() {
-    try {
-      var raw = localStorage.getItem(SESSION_STORAGE_KEY);
-      return raw ? JSON.parse(raw) : null;
-    } catch (e) {
-      return null;
-    }
+  return null;
+}
+
+function setSession(sessionId, user) {
+  try {
+    sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
+      sessionId: sessionId,
+      user: user
+    }));
+  } catch (e) {}
+
+  try {
+    localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({
+      sessionId: sessionId,
+      user: user
+    }));
+  } catch (e) {
+    // ignore if blocked
   }
+}
 
-  function setSession(sessionId, user) {
-    try {
-      localStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify({ sessionId: sessionId, user: user }));
-    } catch (e) { /* localStorage unavailable - session just won't persist across reloads */ }
-  }
-
-  function clearSession() {
-    try { localStorage.removeItem(SESSION_STORAGE_KEY); } catch (e) { /* ignore */ }
-  }
+function clearSession() {
+  try { sessionStorage.removeItem(SESSION_STORAGE_KEY); } catch (e) {}
+  try { localStorage.removeItem(SESSION_STORAGE_KEY); } catch (e) {}
+}
 
   function getSessionId() {
     var s = getSession();
